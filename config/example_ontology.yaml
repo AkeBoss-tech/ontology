@@ -1,0 +1,67 @@
+ontology:
+  objectTypes:
+    - id: "aircraft"
+      displayName: "Aircraft"
+      primaryKey: "tail_number"
+      properties:
+        - id: "tail_number"
+          type: "string"
+          required: true
+        - id: "model"
+          type: "string"
+        - id: "flight_hours"
+          type: "double"
+        - id: "last_maintenance"
+          type: "date"
+      backingDatasource: "s3://clean-data/aircraft_fleet"
+      titleKey: "tail_number"
+
+    - id: "maintenance_event"
+      displayName: "Maintenance Event"
+      primaryKey: "event_id"
+      properties:
+        - id: "event_id"
+          type: "string"
+          required: true
+        - id: "description"
+          type: "string"
+        - id: "date"
+          type: "date"
+        - id: "status"
+          type: "string"
+        - id: "cost"
+          type: "double"
+      titleKey: "event_id"
+
+  linkTypes:
+    - id: "aircraft_has_history"
+      displayName: "Aircraft Has History"
+      source: "aircraft"
+      target: "maintenance_event"
+      cardinality: "ONE_TO_MANY"
+      bidirectional: true
+
+  actionTypes:
+    - id: "schedule_maintenance"
+      displayName: "Schedule Maintenance"
+      parameters:
+        - id: "target_aircraft"
+          type: "object_reference"
+          required: true
+        - id: "date"
+          type: "date"
+          required: true
+        - id: "description"
+          type: "string"
+      logic:
+        - operation: "create_object"
+          type: "maintenance_event"
+          properties:
+            date: "{{date}}"
+            status: "Scheduled"
+            description: "{{description}}"
+        - operation: "create_link"
+          linkType: "aircraft_has_history"
+          from: "{{target_aircraft}}"
+          to: "new_maintenance_event"
+

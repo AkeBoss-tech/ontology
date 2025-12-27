@@ -1,0 +1,12 @@
+[package]
+name = "security"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ontology-engine = { path = "../ontology-engine" }
+serde = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+

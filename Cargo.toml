@@ -1,0 +1,28 @@
+[workspace]
+members = [
+    "rust-core/ontology-engine",
+    "rust-core/indexing",
+    "rust-core/graphql-api",
+    "rust-core/security",
+    "rust-core/versioning",
+    "rust-core/writeback",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Ontology Framework"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+anyhow = "1.0"
+thiserror = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+
