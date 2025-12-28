@@ -111,9 +111,11 @@ async fn main() {
     
     // Create store backends (using placeholder implementations)
     let search_store: Arc<dyn indexing::store::SearchStore> = 
-        Arc::new(ElasticsearchStore::new("http://localhost:9200".to_string()));
+        Arc::new(ElasticsearchStore::new("http://localhost:9200".to_string())
+            .expect("Failed to create Elasticsearch store"));
     let graph_store: Arc<dyn indexing::store::GraphStore> = 
-        Arc::new(DgraphStore::new("http://localhost:8080".to_string()));
+        Arc::new(DgraphStore::new("http://localhost:9080".to_string()).await
+            .expect("Failed to create Dgraph store"));
     let columnar_store: Arc<dyn indexing::store::ColumnarStore> = 
         Arc::new(ParquetStore::new("data/parquet".to_string()));
     

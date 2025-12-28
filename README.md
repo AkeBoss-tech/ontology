@@ -10,6 +10,8 @@ The system follows a hub-and-spoke architecture with three main layers:
 2. **Indexing Core (Rust)**: Multi-store synchronization (Elasticsearch for search, Dgraph/Neo4j for graph, Parquet/S3 for columnar)
 3. **Object API (Rust)**: GraphQL API with Object Level Security (OLS)
 
+**For detailed architecture documentation, design choices, and rationale, see [ARCHITECTURE.md](./ARCHITECTURE.md)**
+
 ## Project Structure
 
 ```
