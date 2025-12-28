@@ -3,6 +3,10 @@ name = "graphql-api"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
+
 [dependencies]
 ontology-engine = { path = "../ontology-engine" }
 indexing = { path = "../indexing" }
@@ -20,4 +24,5 @@ chrono = { workspace = true }
 async-graphql = "5.0"
 async-graphql-axum = "5.0"
 axum = "0.7"
+lazy_static = "1.4"
 

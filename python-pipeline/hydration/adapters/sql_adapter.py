@@ -65,3 +65,5 @@ class SQLAdapter(SourceAdapter):
         }
         return self._schema
 
+
+

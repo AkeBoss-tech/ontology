@@ -59,3 +59,5 @@ class CSVAdapter(SourceAdapter):
             raise RuntimeError("Adapter not connected. Call connect() first.")
         return self._schema
 
+
+

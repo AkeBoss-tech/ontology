@@ -1,0 +1,382 @@
+ontology:
+  objectTypes:
+    # Geospatial Layer - Vintage-Specific Objects
+    - id: "state_vintage"
+      displayName: "State (Vintage)"
+      primaryKey: "geoid_year"
+      properties:
+        - id: "geoid_year"
+          type: "string"
+          required: true
+        - id: "geoid"
+          type: "string"
+          required: true
+        - id: "year"
+          type: "integer"
+          required: true
+        - id: "state_fips"
+          type: "string"
+          required: true
+        - id: "name"
+          type: "string"
+          required: true
+        - id: "total_population"
+          type: "integer"
+        - id: "median_household_income"
+          type: "double"
+        - id: "median_rent"
+          type: "double"
+        - id: "geoshape"
+          type: "geojson"
+        - id: "centroid_lat"
+          type: "double"
+        - id: "centroid_lon"
+          type: "double"
+      titleKey: "name"
+      backingDatasource: "parquet://census_data/states"
+
+    - id: "census_tract_vintage"
+      displayName: "Census Tract (Vintage)"
+      primaryKey: "geoid_year"
+      properties:
+        - id: "geoid_year"
+          type: "string"
+          required: true
+        - id: "geoid"
+          type: "string"
+          required: true
+        - id: "year"
+          type: "integer"
+          required: true
+        - id: "state_fips"
+          type: "string"
+        - id: "county_fips"
+          type: "string"
+        - id: "tract_ce"
+          type: "string"
+        - id: "total_population"
+          type: "integer"
+        - id: "median_household_income"
+          type: "double"
+        - id: "median_rent"
+          type: "double"
+        - id: "geoshape"
+          type: "geojson"  # GeoJSON polygon
+        - id: "centroid_lat"
+          type: "double"
+        - id: "centroid_lon"
+          type: "double"
+      titleKey: "geoid_year"
+      backingDatasource: "parquet://census_data/tracts"
+
+    - id: "county_vintage"
+      displayName: "County (Vintage)"
+      primaryKey: "geoid_year"
+      properties:
+        - id: "geoid_year"
+          type: "string"
+          required: true
+        - id: "geoid"
+          type: "string"
+          required: true
+        - id: "year"
+          type: "integer"
+          required: true
+        - id: "name"
+          type: "string"
+          required: true
+        - id: "state_code"
+          type: "string"
+        - id: "unemployment_rate"
+          type: "double"
+        - id: "geoshape"
+          type: "string"
+      titleKey: "name"
+      backingDatasource: "parquet://census_data/counties"
+
+    - id: "puma_vintage"
+      displayName: "PUMA (Vintage)"
+      primaryKey: "puma_id_year"
+      properties:
+        - id: "puma_id_year"
+          type: "string"
+          required: true
+        - id: "puma_id"
+          type: "string"
+          required: true
+        - id: "year"
+          type: "integer"
+          required: true
+        - id: "name"
+          type: "string"
+        - id: "associated_pums_file_id"
+          type: "string"
+        - id: "state_fips"
+          type: "string"
+      titleKey: "name"
+      backingDatasource: "parquet://census_data/pumas"
+
+    # Boundary Crosswalks
+    - id: "boundary_crosswalk"
+      displayName: "Boundary Crosswalk"
+      primaryKey: "link_id"
+      properties:
+        - id: "link_id"
+          type: "string"
+          required: true
+        - id: "source_tract_id"
+          type: "string"
+          required: true
+        - id: "target_tract_id"
+          type: "string"
+          required: true
+        - id: "source_year"
+          type: "integer"
+          required: true
+        - id: "target_year"
+          type: "integer"
+          required: true
+        - id: "overlap_percentage"
+          type: "double"
+          required: true
+        - id: "allocation_factor"
+          type: "double"
+      titleKey: "link_id"
+      backingDatasource: "parquet://census_data/crosswalks"
+
+    # PUMS Microdata Layer
+    - id: "pums_household"
+      displayName: "PUMS Household"
+      primaryKey: "serialno_year"
+      properties:
+        - id: "serialno_year"
+          type: "string"
+          required: true
+        - id: "serialno"
+          type: "string"
+          required: true
+        - id: "year"
+          type: "integer"
+          required: true
+        - id: "household_income"
+          type: "double"
+        - id: "num_rooms"
+          type: "integer"
+        - id: "original_weight"
+          type: "double"
+        - id: "tenure"
+          type: "string"  # Owned/Rented
+      titleKey: "serialno_year"
+      backingDatasource: "parquet://census_data/pums_households"
+
+    - id: "pums_person"
+      displayName: "PUMS Person"
+      primaryKey: "person_id_year"
+      properties:
+        - id: "person_id_year"
+          type: "string"
+          required: true
+        - id: "person_id"
+          type: "string"
+          required: true
+        - id: "year"
+          type: "integer"
+          required: true
+        - id: "age"
+          type: "integer"
+        - id: "sex"
+          type: "string"
+        - id: "race_code"
+          type: "string"
+        - id: "occupation_code"
+          type: "string"
+        - id: "industry_code"
+          type: "string"
+        - id: "wages"
+          type: "double"
+        - id: "education_attainment"
+          type: "string"
+      titleKey: "person_id_year"
+      backingDatasource: "parquet://census_data/pums_persons"
+
+    # Harmonization Layer
+    - id: "standardized_occupation"
+      displayName: "Standardized Occupation"
+      primaryKey: "occupation_id"
+      properties:
+        - id: "occupation_id"
+          type: "string"
+          required: true
+        - id: "standard_name"
+          type: "string"
+          required: true
+        - id: "category"
+          type: "string"
+        - id: "description"
+          type: "string"
+      titleKey: "standard_name"
+      backingDatasource: "parquet://census_data/harmonized_occupations"
+
+    - id: "occ_code_mapping"
+      displayName: "Occupation Code Mapping"
+      primaryKey: "mapping_id"
+      properties:
+        - id: "mapping_id"
+          type: "string"
+          required: true
+        - id: "raw_code"
+          type: "string"
+          required: true
+        - id: "census_year"
+          type: "integer"
+          required: true
+        - id: "standardized_occupation_id"
+          type: "object_reference"
+          required: true
+        - id: "confidence_score"
+          type: "double"
+      titleKey: "mapping_id"
+      backingDatasource: "parquet://census_data/occ_mappings"
+
+    - id: "variable_concept"
+      displayName: "Variable Concept"
+      primaryKey: "concept_id"
+      properties:
+        - id: "concept_id"
+          type: "string"
+          required: true
+        - id: "concept_name"
+          type: "string"
+          required: true
+        - id: "description"
+          type: "string"
+      titleKey: "concept_name"
+      backingDatasource: "parquet://census_data/variable_concepts"
+
+    - id: "variable_mapping"
+      displayName: "Variable Mapping"
+      primaryKey: "var_mapping_id"
+      properties:
+        - id: "var_mapping_id"
+          type: "string"
+          required: true
+        - id: "variable_concept_id"
+          type: "object_reference"
+          required: true
+        - id: "census_year"
+          type: "integer"
+          required: true
+        - id: "census_table_id"
+          type: "string"
+        - id: "census_column_id"
+          type: "string"
+      titleKey: "var_mapping_id"
+      backingDatasource: "parquet://census_data/variable_mappings"
+
+  linkTypes:
+    # Geospatial links
+    - id: "tract_to_county"
+      displayName: "Tract to County"
+      source: "census_tract_vintage"
+      target: "county_vintage"
+      cardinality: "MANY_TO_ONE"
+      bidirectional: true
+      properties:
+        - id: "year"
+          type: "integer"
+          required: true
+
+    - id: "tract_to_puma"
+      displayName: "Tract to PUMA"
+      source: "census_tract_vintage"
+      target: "puma_vintage"
+      cardinality: "MANY_TO_ONE"
+      bidirectional: true
+      properties:
+        - id: "year"
+          type: "integer"
+          required: true
+        - id: "allocation_factor"
+          type: "double"
+
+    # Crosswalk links
+    - id: "crosswalk_source_to_tract"
+      displayName: "Crosswalk Source to Tract"
+      source: "boundary_crosswalk"
+      target: "census_tract_vintage"
+      cardinality: "ONE_TO_ONE"
+      properties:
+        - id: "role"
+          type: "string"
+          default: "source"
+
+    - id: "crosswalk_target_to_tract"
+      displayName: "Crosswalk Target to Tract"
+      source: "boundary_crosswalk"
+      target: "census_tract_vintage"
+      cardinality: "ONE_TO_ONE"
+      properties:
+        - id: "role"
+          type: "string"
+          default: "target"
+
+    # PUMS links
+    - id: "puma_to_household"
+      displayName: "PUMA to Household"
+      source: "puma_vintage"
+      target: "pums_household"
+      cardinality: "ONE_TO_MANY"
+      bidirectional: true
+      properties:
+        - id: "year"
+          type: "integer"
+          required: true
+
+    - id: "household_to_person"
+      displayName: "Household to Person"
+      source: "pums_household"
+      target: "pums_person"
+      cardinality: "ONE_TO_MANY"
+      bidirectional: true
+
+    # Harmonization links
+    - id: "person_to_occupation"
+      displayName: "Person to Standardized Occupation"
+      source: "pums_person"
+      target: "standardized_occupation"
+      cardinality: "MANY_TO_ONE"
+      bidirectional: true
+      properties:
+        - id: "via_mapping"
+          type: "object_reference"
+
+    - id: "occ_code_to_standard"
+      displayName: "Occupation Code to Standard"
+      source: "occ_code_mapping"
+      target: "standardized_occupation"
+      cardinality: "MANY_TO_ONE"
+      bidirectional: true
+
+    - id: "concept_to_mapping"
+      displayName: "Concept to Variable Mapping"
+      source: "variable_concept"
+      target: "variable_mapping"
+      cardinality: "ONE_TO_MANY"
+      bidirectional: true
+
+  actionTypes: []
+    # Note: Action types with logic require PropertyMap format which is complex in YAML
+    # These will be implemented programmatically once the action execution engine is complete
+    # - id: "normalize_boundaries"
+    #   displayName: "Normalize Boundaries to Target Year"
+    #   parameters:
+    #     - id: "source_tract_id"
+    #       type: "object_reference"
+    #       required: true
+    #     - id: "target_year"
+    #       type: "integer"
+    #       required: true
+    #     - id: "variable_name"
+    #       type: "string"
+    #       required: true
+

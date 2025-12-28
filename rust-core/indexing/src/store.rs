@@ -82,6 +82,24 @@ pub trait GraphStore: Send + Sync {
         object_id: &str,
         link_type_id: &str,
     ) -> Result<Vec<String>, StoreError>;
+    
+    /// Traverse with filters - filter by link properties during traversal
+    async fn traverse_with_filters(
+        &self,
+        start_id: &str,
+        link_type_ids: &[String],
+        max_hops: usize,
+        link_filters: &[Filter], // Filters on link properties
+    ) -> Result<Vec<String>, StoreError>;
+    
+    /// Traverse with aggregation - aggregate properties during traversal
+    async fn traverse_with_aggregation(
+        &self,
+        start_id: &str,
+        link_type_ids: &[String],
+        max_hops: usize,
+        aggregation: &TraversalAggregation,
+    ) -> Result<TraversalAggregationResult, StoreError>;
 }
 
 /// Abstract trait for columnar store backends (Parquet, S3, etc.)
@@ -125,6 +143,8 @@ pub struct Filter {
     pub property: String,
     pub operator: FilterOperator,
     pub value: ontology_engine::PropertyValue,
+    /// Optional distance parameter for WithinDistance operator (in meters)
+    pub distance: Option<f64>,
 }
 
 /// Filter operators
@@ -141,6 +161,11 @@ pub enum FilterOperator {
     EndsWith,
     In,
     NotIn,
+    // Spatial operators for GeoJSON
+    ContainsGeometry,    // Check if geometry contains another geometry
+    Intersects,          // Check if geometries intersect
+    Within,              // Check if geometry is within another geometry
+    WithinDistance,      // Check if geometry is within distance (requires distance parameter)
 }
 
 /// Sort option
@@ -204,6 +229,26 @@ pub enum Aggregation {
 pub struct AnalyticsResult {
     pub rows: Vec<HashMap<String, ontology_engine::PropertyValue>>,
     pub total: usize,
+}
+
+/// Traversal aggregation configuration
+#[derive(Debug, Clone)]
+pub struct TraversalAggregation {
+    /// Property to aggregate (e.g., "wages", "age")
+    pub property: String,
+    /// Aggregation operation
+    pub operation: Aggregation,
+    /// Optional filters on target objects
+    pub object_filters: Vec<Filter>,
+}
+
+/// Traversal aggregation result
+#[derive(Debug, Clone)]
+pub struct TraversalAggregationResult {
+    /// Aggregated value
+    pub value: ontology_engine::PropertyValue,
+    /// Count of objects aggregated
+    pub count: usize,
 }
 
 /// Store backend - wrapper that implements all three store traits
@@ -381,6 +426,35 @@ impl GraphStore for DgraphStore {
     ) -> Result<Vec<String>, StoreError> {
         // TODO: Implement actual Dgraph connected objects query
         Ok(vec![])
+    }
+    
+    async fn traverse_with_filters(
+        &self,
+        start_id: &str,
+        link_type_ids: &[String],
+        max_hops: usize,
+        link_filters: &[Filter],
+    ) -> Result<Vec<String>, StoreError> {
+        // TODO: Implement filtered traversal
+        // This would filter links based on their properties during traversal
+        // For now, fall back to basic traversal
+        self.traverse(start_id, link_type_ids, max_hops).await
+    }
+    
+    async fn traverse_with_aggregation(
+        &self,
+        start_id: &str,
+        link_type_ids: &[String],
+        max_hops: usize,
+        aggregation: &TraversalAggregation,
+    ) -> Result<TraversalAggregationResult, StoreError> {
+        // TODO: Implement aggregation during traversal
+        // This would traverse the graph and aggregate properties of reached objects
+        // For now, return a placeholder result
+        Ok(TraversalAggregationResult {
+            value: ontology_engine::PropertyValue::Integer(0),
+            count: 0,
+        })
     }
 }
 

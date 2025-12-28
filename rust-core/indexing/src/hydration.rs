@@ -134,6 +134,10 @@ fn property_value_to_json(value: &ontology_engine::PropertyValue) -> serde_json:
         ontology_engine::PropertyValue::Date(d) => d.clone().into(),
         ontology_engine::PropertyValue::DateTime(dt) => dt.clone().into(),
         ontology_engine::PropertyValue::ObjectReference(id) => id.clone().into(),
+        ontology_engine::PropertyValue::GeoJSON(gj) => {
+            // Parse GeoJSON string to validate, then return as JSON value
+            serde_json::from_str(gj).unwrap_or_else(|_| serde_json::Value::String(gj.clone()))
+        },
         ontology_engine::PropertyValue::Null => serde_json::Value::Null,
     }
 }

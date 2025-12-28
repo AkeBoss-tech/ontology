@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 /// Property Type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -12,6 +13,7 @@ pub enum PropertyType {
     Date,
     DateTime,
     ObjectReference,
+    GeoJSON, // Geospatial data (GeoJSON format)
     // Add more types as needed
 }
 
@@ -26,6 +28,7 @@ impl PropertyType {
             "date" => Ok(PropertyType::Date),
             "datetime" | "timestamp" => Ok(PropertyType::DateTime),
             "object_reference" | "objectreference" => Ok(PropertyType::ObjectReference),
+            "geojson" | "geo_json" => Ok(PropertyType::GeoJSON),
             _ => Err(format!("Unknown property type: {}", s)),
         }
     }
@@ -87,6 +90,15 @@ pub struct PropertyValidation {
 impl Property {
     /// Validate a property value against this property's rules
     pub fn validate_value(&self, value: &PropertyValue) -> Result<(), String> {
+        self.validate_value_with_reference_check(value, None)
+    }
+    
+    /// Validate a property value with optional reference existence check
+    pub fn validate_value_with_reference_check(
+        &self,
+        value: &PropertyValue,
+        reference_checker: Option<&dyn Fn(&str, &str) -> bool>, // (object_type, object_id) -> exists
+    ) -> Result<(), String> {
         // Type checking
         match (&self.property_type, value) {
             (PropertyType::String, PropertyValue::String(_)) => {}
@@ -95,7 +107,39 @@ impl Property {
             (PropertyType::Boolean, PropertyValue::Boolean(_)) => {}
             (PropertyType::Date, PropertyValue::Date(_)) => {}
             (PropertyType::DateTime, PropertyValue::DateTime(_)) => {}
-            (PropertyType::ObjectReference, PropertyValue::ObjectReference(_)) => {}
+            (PropertyType::ObjectReference, PropertyValue::ObjectReference(ref_id)) => {
+                // If reference checker is provided, validate that the referenced object exists
+                if let Some(checker) = reference_checker {
+                    // Extract object type and ID from reference (format: "object_type:object_id" or just "object_id")
+                    let parts: Vec<&str> = ref_id.split(':').collect();
+                    let (obj_type, obj_id) = if parts.len() == 2 {
+                        (parts[0], parts[1])
+                    } else {
+                        // If no type prefix, we can't validate - this is a limitation
+                        // In a real system, we'd need the object type context
+                        return Err(format!(
+                            "Object reference '{}' must be in format 'object_type:object_id' for validation",
+                            ref_id
+                        ));
+                    };
+                    
+                    if !checker(obj_type, obj_id) {
+                        return Err(format!(
+                            "Referenced object '{}' of type '{}' does not exist",
+                            obj_id, obj_type
+                        ));
+                    }
+                }
+            }
+            (PropertyType::GeoJSON, PropertyValue::GeoJSON(gj)) => {
+                // Validate GeoJSON format
+                if let Err(e) = geojson::GeoJson::from_str(gj) {
+                    return Err(format!(
+                        "Property '{}' contains invalid GeoJSON: {}",
+                        self.id, e
+                    ));
+                }
+            }
             _ => {
                 return Err(format!(
                     "Property '{}' expects type {:?}, got incompatible value",
@@ -181,6 +225,15 @@ impl Property {
                         }
                     }
                 }
+                PropertyValue::GeoJSON(gj) => {
+                    // Validate GeoJSON format if not already validated in type check
+                    if let Err(e) = geojson::GeoJson::from_str(gj) {
+                        return Err(format!(
+                            "Property '{}' contains invalid GeoJSON: {}",
+                            self.id, e
+                        ));
+                    }
+                }
                 _ => {}
             }
         }
@@ -200,6 +253,7 @@ pub enum PropertyValue {
     Date(String), // ISO 8601 date string
     DateTime(String), // ISO 8601 datetime string
     ObjectReference(String), // Object ID
+    GeoJSON(String), // GeoJSON string (can be parsed to validate)
     Null,
 }
 
@@ -214,6 +268,7 @@ impl PropertyValue {
             PropertyValue::Date(d) => d.clone(),
             PropertyValue::DateTime(dt) => dt.clone(),
             PropertyValue::ObjectReference(id) => id.clone(),
+            PropertyValue::GeoJSON(gj) => gj.clone(),
             PropertyValue::Null => "null".to_string(),
         }
     }

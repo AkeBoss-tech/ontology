@@ -112,3 +112,5 @@ class SchemaMapper:
         return str(source_row.get(mapping.primary_key_mapping.source_column, ''))
 
 
+
+

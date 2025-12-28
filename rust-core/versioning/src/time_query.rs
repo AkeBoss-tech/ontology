@@ -153,6 +153,105 @@ impl TimeQuery {
             vec![]
         }
     }
+    
+    /// Query objects by year/vintage - filters objects that have a 'year' property matching the criteria
+    pub fn query_by_year(
+        &self,
+        object_type: &str,
+        year: i64,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Vec<HistoricalObject> {
+        let query_timestamp = timestamp.unwrap_or_else(Utc::now);
+        let snapshot = self.create_snapshot(query_timestamp, &[object_type.to_string()]);
+        
+        snapshot.get_objects_by_type(object_type)
+            .into_iter()
+            .filter(|obj| {
+                // Check if object has a 'year' property matching the query year
+                if let Some(ontology_engine::PropertyValue::Integer(obj_year)) = obj.properties.get("year") {
+                    *obj_year == year
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect()
+    }
+    
+    /// Query objects by year range
+    pub fn query_by_year_range(
+        &self,
+        object_type: &str,
+        start_year: i64,
+        end_year: i64,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Vec<HistoricalObject> {
+        let query_timestamp = timestamp.unwrap_or_else(Utc::now);
+        let snapshot = self.create_snapshot(query_timestamp, &[object_type.to_string()]);
+        
+        snapshot.get_objects_by_type(object_type)
+            .into_iter()
+            .filter(|obj| {
+                // Check if object has a 'year' property within the range
+                if let Some(ontology_engine::PropertyValue::Integer(obj_year)) = obj.properties.get("year") {
+                    *obj_year >= start_year && *obj_year <= end_year
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect()
+    }
+    
+    /// Query objects "as of" a specific date - useful for vintage-specific queries
+    pub fn query_as_of_date(
+        &self,
+        object_type: &str,
+        as_of_date: DateTime<Utc>,
+        year: Option<i64>,
+    ) -> Vec<HistoricalObject> {
+        let snapshot = self.create_snapshot(as_of_date, &[object_type.to_string()]);
+        
+        let mut results: Vec<HistoricalObject> = snapshot.get_objects_by_type(object_type)
+            .into_iter()
+            .cloned()
+            .collect();
+        
+        // If year filter is provided, filter by year
+        if let Some(filter_year) = year {
+            results.retain(|obj| {
+                if let Some(ontology_engine::PropertyValue::Integer(obj_year)) = obj.properties.get("year") {
+                    *obj_year == filter_year
+                } else {
+                    false
+                }
+            });
+        }
+        
+        results
+    }
+    
+    /// Get available years for an object type
+    pub fn get_available_years(
+        &self,
+        object_type: &str,
+        timestamp: Option<DateTime<Utc>>,
+    ) -> Vec<i64> {
+        let query_timestamp = timestamp.unwrap_or_else(Utc::now);
+        let snapshot = self.create_snapshot(query_timestamp, &[object_type.to_string()]);
+        
+        let mut years: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        
+        for obj in snapshot.get_objects_by_type(object_type) {
+            if let Some(ontology_engine::PropertyValue::Integer(year)) = obj.properties.get("year") {
+                years.insert(*year);
+            }
+        }
+        
+        let mut year_vec: Vec<i64> = years.into_iter().collect();
+        year_vec.sort();
+        year_vec
+    }
 }
 
 impl Snapshot {
