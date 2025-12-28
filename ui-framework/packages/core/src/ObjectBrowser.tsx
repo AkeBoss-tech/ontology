@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, gql } from '@apollo/client';
 import { useOntology } from './OntologyProvider';
 import { ObjectSearch } from './ObjectSearch';
+import { parseProperties } from './utils';
 
 const GET_OBJECT = gql`
   query GetObject($objectType: String!, $objectId: String!) {
@@ -55,7 +56,7 @@ export function ObjectBrowser({ objectType, initialObjectId }: ObjectBrowserProp
   });
 
   const object = objectData?.getObject;
-  const properties = object ? JSON.parse(object.properties) : {};
+  const properties = object ? parseProperties(object.properties) : {};
 
   return (
     <div className="object-browser grid grid-cols-2 gap-4">
@@ -126,6 +127,7 @@ export function ObjectBrowser({ objectType, initialObjectId }: ObjectBrowserProp
     </div>
   );
 }
+
 
 
 

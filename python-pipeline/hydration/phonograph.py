@@ -2,11 +2,18 @@
 from typing import Optional, Callable, Dict, Any
 import asyncio
 import logging
+import json
 from .schema_mapper import SchemaMapper, SchemaMapping
 from .adapters.base import SourceAdapter
 
-
 logger = logging.getLogger(__name__)
+
+try:
+    from confluent_kafka import Consumer, KafkaError, KafkaException
+    KAFKA_AVAILABLE = True
+except ImportError:
+    KAFKA_AVAILABLE = False
+    logger.warning("confluent-kafka not available. Kafka streaming will be disabled.")
 
 
 class Phonograph:
@@ -141,11 +148,84 @@ class StreamingPhonograph(Phonograph):
         Args:
             topic: Kafka topic name
             mapping: Schema mapping to use
-            kafka_config: Kafka consumer configuration
+            kafka_config: Kafka consumer configuration (bootstrap.servers, group.id, etc.)
         """
-        # TODO: Implement Kafka streaming
-        # Would use kafka-python or confluent-kafka-python
-        raise NotImplementedError("Kafka streaming not yet implemented")
+        if not KAFKA_AVAILABLE:
+            raise RuntimeError("confluent-kafka is not installed. Install it with: pip install confluent-kafka")
+        
+        # Set up default consumer config
+        consumer_config = {
+            'bootstrap.servers': kafka_config.get('bootstrap.servers', 'localhost:9092'),
+            'group.id': kafka_config.get('group.id', 'ontology_group'),
+            'auto.offset.reset': kafka_config.get('auto.offset.reset', 'earliest'),
+            'enable.auto.commit': kafka_config.get('enable.auto.commit', True),
+        }
+        
+        # Add any additional config
+        consumer_config.update({k: v for k, v in kafka_config.items() 
+                               if k not in ['bootstrap.servers', 'group.id', 'auto.offset.reset', 'enable.auto.commit']})
+        
+        consumer = Consumer(consumer_config)
+        consumer.subscribe([topic])
+        
+        self.running = True
+        logger.info(f"Started Kafka consumer for topic: {topic}")
+        
+        try:
+            while self.running:
+                # Poll for messages (non-blocking)
+                msg = consumer.poll(timeout=1.0)
+                
+                if msg is None:
+                    continue
+                
+                if msg.error():
+                    if msg.error().code() == KafkaError._PARTITION_EOF:
+                        # End of partition event - not an error
+                        logger.debug(f"Reached end of partition: {msg.topic()}[{msg.partition()}]")
+                        continue
+                    else:
+                        logger.error(f"Consumer error: {msg.error()}")
+                        continue
+                
+                try:
+                    # Parse message value (assumed to be JSON)
+                    message_data = json.loads(msg.value().decode('utf-8'))
+                    
+                    # Map the message data to ontology properties
+                    properties = self.schema_mapper.map_row(mapping, message_data)
+                    primary_key = self.schema_mapper.extract_primary_key(mapping, message_data)
+                    
+                    # Process the object
+                    if self.sink_callback:
+                        self.sink_callback(mapping.object_type_id, primary_key, properties)
+                    else:
+                        logger.debug(f"Processed message: {mapping.object_type_id}/{primary_key}")
+                    
+                    logger.debug(f"Processed message from {msg.topic()}[{msg.partition()}] offset {msg.offset()}")
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse message as JSON: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}", exc_info=True)
+                    continue
+                    
+        except KeyboardInterrupt:
+            logger.info("Received interrupt signal, shutting down...")
+        except Exception as e:
+            logger.error(f"Error in Kafka consumer: {e}", exc_info=True)
+            raise
+        finally:
+            self.running = False
+            consumer.close()
+            logger.info("Kafka consumer closed")
+    
+    def stop_streaming(self):
+        """Stop the Kafka streaming loop."""
+        self.running = False
+        logger.info("Stopping Kafka consumer...")
+
 
 
 

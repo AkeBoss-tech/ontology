@@ -1,11 +1,13 @@
-use async_graphql::{Context, Object, FieldResult, InputObject, SimpleObject};
+use async_graphql::{Context, Object, FieldResult, InputObject, SimpleObject, Json};
 use indexing::store::{SearchStore, GraphStore, SearchQuery, Filter};
 use indexing::hydration::ObjectHydrator;
-use ontology_engine::{Ontology, FunctionExecutor, InterfaceValidator};
+use ontology_engine::{Ontology, FunctionExecutor, InterfaceValidator, PropertyValue};
 use versioning::time_query;
 use std::sync::Arc;
 use std::collections::HashMap;
 use serde_json::Value;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 
 /// Root query type for GraphQL API
 #[derive(Default)]
@@ -31,54 +33,7 @@ impl QueryRoot {
         let mut store_filters = Vec::new();
         if let Some(filter_inputs) = filters {
             for filter_input in filter_inputs {
-                // Parse operator
-                let operator = match filter_input.operator.to_lowercase().as_str() {
-                    "equals" | "eq" => indexing::store::FilterOperator::Equals,
-                    "notequals" | "ne" => indexing::store::FilterOperator::NotEquals,
-                    "greaterthan" | "gt" => indexing::store::FilterOperator::GreaterThan,
-                    "lessthan" | "lt" => indexing::store::FilterOperator::LessThan,
-                    "greaterthanorequal" | "gte" => indexing::store::FilterOperator::GreaterThanOrEqual,
-                    "lessthanorequal" | "lte" => indexing::store::FilterOperator::LessThanOrEqual,
-                    "contains" => indexing::store::FilterOperator::Contains,
-                    "startswith" => indexing::store::FilterOperator::StartsWith,
-                    "endswith" => indexing::store::FilterOperator::EndsWith,
-                    "in" => indexing::store::FilterOperator::In,
-                    "notin" => indexing::store::FilterOperator::NotIn,
-                    "containsgeometry" => indexing::store::FilterOperator::ContainsGeometry,
-                    "intersects" => indexing::store::FilterOperator::Intersects,
-                    "within" => indexing::store::FilterOperator::Within,
-                    "withindistance" => indexing::store::FilterOperator::WithinDistance,
-                    _ => return Err(async_graphql::Error::new(format!(
-                        "Invalid filter operator: {}",
-                        filter_input.operator
-                    ))),
-                };
-                
-                // Parse value (simplified - would need proper JSON parsing)
-                let value = serde_json::from_str::<serde_json::Value>(&filter_input.value)
-                    .map_err(|e| async_graphql::Error::new(format!("Invalid filter value JSON: {}", e)))?;
-                
-                let property_value = match value {
-                    serde_json::Value::String(s) => ontology_engine::PropertyValue::String(s),
-                    serde_json::Value::Number(n) => {
-                        if let Some(i) = n.as_i64() {
-                            ontology_engine::PropertyValue::Integer(i)
-                        } else if let Some(d) = n.as_f64() {
-                            ontology_engine::PropertyValue::Double(d)
-                        } else {
-                            return Err(async_graphql::Error::new("Invalid number in filter value"));
-                        }
-                    }
-                    serde_json::Value::Bool(b) => ontology_engine::PropertyValue::Boolean(b),
-                    _ => return Err(async_graphql::Error::new("Unsupported filter value type")),
-                };
-                
-                store_filters.push(Filter {
-                    property: filter_input.property,
-                    operator,
-                    value: property_value,
-                    distance: filter_input.distance,
-                });
+                store_filters.push(convert_filter_input(filter_input)?);
             }
         }
         
@@ -170,7 +125,7 @@ impl QueryRoot {
                         object_type: object_type.clone(),
                         object_id,
                         title,
-                        properties: serde_json::to_string(obj).unwrap_or_else(|_| "{}".to_string()),
+                        properties: Json((*obj).clone()),
                     }
                 }).collect();
                 
@@ -204,11 +159,15 @@ impl QueryRoot {
             .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
         
         // Convert to GraphQL results
-        Ok(hydrated.into_iter().map(|h| ObjectResult {
-            object_type: h.object_type,
-            object_id: h.object_id,
-            title: h.title,
-            properties: serde_json::to_string(&h.properties).unwrap_or_else(|_| "{}".to_string()),
+        Ok(hydrated.into_iter().map(|h| {
+            let properties_json: Value = serde_json::to_value(&h.properties)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            ObjectResult {
+                object_type: h.object_type,
+                object_id: h.object_id,
+                title: h.title,
+                properties: Json(properties_json),
+            }
         }).collect())
     }
     
@@ -233,11 +192,13 @@ impl QueryRoot {
             let hydrated = hydrator.hydrate_from_indexed(&indexed, object_type_def)
                 .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
             
+            let properties_json: Value = serde_json::to_value(&hydrated.properties)
+                .unwrap_or_else(|_| serde_json::json!({}));
             Ok(Some(ObjectResult {
                 object_type: hydrated.object_type,
                 object_id: hydrated.object_id,
                 title: hydrated.title,
-                properties: serde_json::to_string(&hydrated.properties).unwrap_or_else(|_| "{}".to_string()),
+                properties: Json(properties_json),
             }))
         } else {
             Ok(None)
@@ -284,11 +245,13 @@ impl QueryRoot {
                 .map_err(|e| async_graphql::Error::new(format!("Get error: {}", e)))?
             {
                 if let Ok(hydrated) = hydrator.hydrate_from_indexed(&indexed, target_type_def) {
+                    let properties_json: Value = serde_json::to_value(&hydrated.properties)
+                        .unwrap_or_else(|_| serde_json::json!({}));
                     results.push(ObjectResult {
                         object_type: hydrated.object_type,
                         object_id: hydrated.object_id,
                         title: hydrated.title,
-                        properties: serde_json::to_string(&hydrated.properties).unwrap_or_else(|_| "{}".to_string()),
+                        properties: Json(properties_json),
                     });
                 }
             }
@@ -370,11 +333,15 @@ impl QueryRoot {
             .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
         
         // Convert to GraphQL results
-        Ok(hydrated.into_iter().map(|h| ObjectResult {
-            object_type: h.object_type,
-            object_id: h.object_id,
-            title: h.title,
-            properties: serde_json::to_string(&h.properties).unwrap_or_else(|_| "{}".to_string()),
+        Ok(hydrated.into_iter().map(|h| {
+            let properties_json: Value = serde_json::to_value(&h.properties)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            ObjectResult {
+                object_type: h.object_type,
+                object_id: h.object_id,
+                title: h.title,
+                properties: Json(properties_json),
+            }
         }).collect())
     }
     
@@ -424,11 +391,13 @@ impl QueryRoot {
             };
             
             if let Ok(hydrated) = hydrator.hydrate_from_indexed(&indexed, object_type_def) {
+                let properties_json: Value = serde_json::to_value(&hydrated.properties)
+                    .unwrap_or_else(|_| serde_json::json!({}));
                 results.push(ObjectResult {
                     object_type: hydrated.object_type,
                     object_id: hydrated.object_id,
                     title: hydrated.title,
-                    properties: serde_json::to_string(&hydrated.properties).unwrap_or_else(|_| "{}".to_string()),
+                    properties: Json(properties_json),
                 });
             }
         }
@@ -514,9 +483,11 @@ impl QueryRoot {
             ).await
             .map_err(|e| async_graphql::Error::new(format!("Traversal error: {}", e)))?;
             
+            let agg_value_json: Value = serde_json::to_value(&result.value)
+                .unwrap_or_else(|_| serde_json::Value::Null);
             return Ok(TraversalResult {
                 object_ids: vec![],
-                aggregated_value: Some(serde_json::to_string(&result.value).unwrap_or_else(|_| "null".to_string())),
+                aggregated_value: Some(Json(agg_value_json)),
                 count: Some(result.count),
             });
         }
@@ -568,8 +539,13 @@ impl QueryRoot {
             store_aggregations.push(agg);
         }
         
-        // Convert filters (simplified - would need proper parsing)
-        let store_filters = vec![]; // TODO: Convert FilterInput to Filter
+        // Convert filters
+        let mut store_filters = Vec::new();
+        if let Some(filter_inputs) = filters {
+            for filter_input in filter_inputs {
+                store_filters.push(convert_filter_input(filter_input)?);
+            }
+        }
         
         // Build analytics query
         let query = indexing::store::AnalyticsQuery {
@@ -594,7 +570,7 @@ impl QueryRoot {
             .collect();
         
         Ok(AggregationResult {
-            rows: serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string()),
+            rows: Json(Value::Array(rows)),
             total: result.total,
         })
     }
@@ -660,19 +636,77 @@ impl QueryRoot {
             param_map.insert(key, prop_value);
         }
         
-        // Execute function
-        let result = FunctionExecutor::execute(
-            function_def,
-            &param_map,
-            None, // get_object_property callback - would need to be implemented
-            None, // get_linked_objects callback - would need to be implemented
-            None, // aggregate_linked_properties callback - would need to be implemented
-        ).await
-        .map_err(|e| async_graphql::Error::new(format!("Function execution error: {}", e)))?;
+        // Check cache if function is cacheable
+        let mut cached = false;
+        let cache_key = if function_def.cacheable {
+            // Generate cache key from function_id + serialized parameters
+            let mut hasher = DefaultHasher::new();
+            function_id.hash(&mut hasher);
+            // Serialize parameters for hashing
+            if let Ok(param_json) = serde_json::to_string(&param_map) {
+                param_json.hash(&mut hasher);
+            }
+            Some(hasher.finish())
+        } else {
+            None
+        };
         
+        // Try to get from cache
+        let result_value = if let Some(key) = cache_key {
+            // Get cache from context
+            if let Ok(cache) = ctx.data::<Arc<tokio::sync::RwLock<HashMap<u64, PropertyValue>>>>() {
+                let cache_read = cache.read().await;
+                if let Some(cached_value) = cache_read.get(&key) {
+                    cached = true;
+                    cached_value.clone()
+                } else {
+                    // Execute function and cache result
+                    let result = FunctionExecutor::execute(
+                        function_def,
+                        &param_map,
+                        None, // get_object_property callback - would need to be implemented
+                        None, // get_linked_objects callback - would need to be implemented
+                        None, // aggregate_linked_properties callback - would need to be implemented
+                    ).await
+                    .map_err(|e| async_graphql::Error::new(format!("Function execution error: {}", e)))?;
+                    
+                    // Store in cache
+                    let result_value = result.value.clone();
+                    drop(cache_read);
+                    let mut cache_write = cache.write().await;
+                    cache_write.insert(key, result_value.clone());
+                    result_value
+                }
+            } else {
+                // No cache available, just execute
+                let result = FunctionExecutor::execute(
+                    function_def,
+                    &param_map,
+                    None,
+                    None,
+                    None,
+                ).await
+                .map_err(|e| async_graphql::Error::new(format!("Function execution error: {}", e)))?;
+                result.value
+            }
+        } else {
+            // Function is not cacheable, just execute
+            let result = FunctionExecutor::execute(
+                function_def,
+                &param_map,
+                None,
+                None,
+                None,
+            ).await
+            .map_err(|e| async_graphql::Error::new(format!("Function execution error: {}", e)))?;
+            result.value
+        };
+        
+        let value_json: Value = serde_json::to_value(&result_value)
+            .unwrap_or_else(|_| serde_json::Value::Null);
         Ok(FunctionResult {
-            value: serde_json::to_string(&result.value).unwrap_or_else(|_| "null".to_string()),
-            cached: false, // TODO: Implement caching
+            value: Json(value_json),
+            cached,
         })
     }
     
@@ -705,10 +739,18 @@ impl QueryRoot {
         
         // Query each implementing object type and combine results
         let mut all_results = Vec::new();
+        
+        // Convert filters once for all object types
+        let mut store_filters = Vec::new();
+        if let Some(filter_inputs) = filters {
+            for filter_input in filter_inputs {
+                store_filters.push(convert_filter_input(filter_input)?);
+            }
+        }
+        
         for object_type in implementers {
-            // Build filters (simplified - would need proper filter conversion)
             let query = SearchQuery {
-                filters: vec![], // TODO: Convert FilterInput to Filter for each object type
+                filters: store_filters.clone(),
                 sort: None,
                 limit,
                 offset,
@@ -723,11 +765,13 @@ impl QueryRoot {
                 .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
             
             for h in hydrated {
+                let properties_json: Value = serde_json::to_value(&h.properties)
+                    .unwrap_or_else(|_| serde_json::json!({}));
                 all_results.push(ObjectResult {
                     object_type: h.object_type,
                     object_id: h.object_id,
                     title: h.title,
-                    properties: serde_json::to_string(&h.properties).unwrap_or_else(|_| "{}".to_string()),
+                    properties: Json(properties_json),
                 });
             }
         }
@@ -786,41 +830,55 @@ impl QueryRoot {
     ) -> FieldResult<Vec<InterfaceDefinition>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
         
-        let interfaces: Vec<InterfaceDefinition> = ontology
-            .interfaces()
-            .map(|i| {
-                let properties: Vec<PropertyOutput> = i.properties.iter().map(|p| {
-                    PropertyOutput {
-                        id: p.id.clone(),
-                        display_name: p.display_name.clone(),
-                        property_type: format!("{:?}", p.property_type),
-                        required: p.required,
-                    }
-                }).collect();
-                
-                // Get implementers
-                let implementers: Vec<ImplementerInfo> = InterfaceValidator::get_implementers(
-                    &i.id,
-                    ontology.object_types(),
-                )
-                .iter()
-                .map(|ot| {
-                    // Count would need to come from search store - simplified for now
-                    ImplementerInfo {
-                        object_type: ot.id.clone(),
-                        count: 0, // TODO: Get actual count from search store
-                    }
-                })
-                .collect();
-                
-                InterfaceDefinition {
-                    id: i.id.clone(),
-                    display_name: i.display_name.clone(),
-                    properties,
-                    implementers,
+        let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
+        
+        let mut interfaces = Vec::new();
+        for i in ontology.interfaces() {
+            let properties: Vec<PropertyOutput> = i.properties.iter().map(|p| {
+                PropertyOutput {
+                    id: p.id.clone(),
+                    display_name: p.display_name.clone(),
+                    property_type: format!("{:?}", p.property_type),
+                    required: p.required,
                 }
-            })
-            .collect();
+            }).collect();
+            
+            // Get implementers
+            let implementer_types: Vec<_> = InterfaceValidator::get_implementers(
+                &i.id,
+                ontology.object_types(),
+            ).into_iter().collect();
+            
+            // Get counts for each implementer (async operation)
+            let mut implementers = Vec::new();
+            for ot in implementer_types {
+                // Do a minimal search to check if objects exist
+                // Note: For exact counts, we'd need a count() method in SearchStore
+                let count_query = SearchQuery {
+                    filters: vec![],
+                    sort: None,
+                    limit: Some(1), // Just check existence
+                    offset: None,
+                };
+                
+                let count = match search_store.count_objects(&ot.id, None).await {
+                    Ok(count) => count as usize,
+                    Err(_) => 0,
+                };
+                
+                implementers.push(ImplementerInfo {
+                    object_type: ot.id.clone(),
+                    count,
+                });
+            }
+            
+            interfaces.push(InterfaceDefinition {
+                id: i.id.clone(),
+                display_name: i.display_name.clone(),
+                properties,
+                implementers,
+            });
+        }
         
         Ok(interfaces)
     }
@@ -868,7 +926,7 @@ struct AggregationInput {
 /// GraphQL result type for aggregations
 #[derive(SimpleObject)]
 pub struct AggregationResult {
-    pub rows: String, // JSON array of aggregated rows
+    pub rows: Json<Value>, // Proper JSON array instead of stringified JSON
     pub total: usize,
 }
 
@@ -877,8 +935,48 @@ pub struct AggregationResult {
 struct FilterInput {
     property: String,
     operator: String,
-    value: String, // JSON string for now - TODO: implement proper PropertyValue GraphQL type
+    value: String, // Keep as string for input parsing - PropertyValue is complex to represent as GraphQL input
     distance: Option<f64>, // For spatial WithinDistance operator
+}
+
+/// Convert FilterInput to Filter
+fn convert_filter_input(filter_input: FilterInput) -> FieldResult<Filter> {
+    // Parse operator
+    let operator = match filter_input.operator.to_lowercase().as_str() {
+        "equals" | "eq" => indexing::store::FilterOperator::Equals,
+        "notequals" | "ne" => indexing::store::FilterOperator::NotEquals,
+        "greaterthan" | "gt" => indexing::store::FilterOperator::GreaterThan,
+        "lessthan" | "lt" => indexing::store::FilterOperator::LessThan,
+        "greaterthanorequal" | "gte" => indexing::store::FilterOperator::GreaterThanOrEqual,
+        "lessthanorequal" | "lte" => indexing::store::FilterOperator::LessThanOrEqual,
+        "contains" => indexing::store::FilterOperator::Contains,
+        "startswith" => indexing::store::FilterOperator::StartsWith,
+        "endswith" => indexing::store::FilterOperator::EndsWith,
+        "in" => indexing::store::FilterOperator::In,
+        "notin" => indexing::store::FilterOperator::NotIn,
+        "containsgeometry" => indexing::store::FilterOperator::ContainsGeometry,
+        "intersects" => indexing::store::FilterOperator::Intersects,
+        "within" => indexing::store::FilterOperator::Within,
+        "withindistance" => indexing::store::FilterOperator::WithinDistance,
+        _ => return Err(async_graphql::Error::new(format!(
+            "Invalid filter operator: {}",
+            filter_input.operator
+        ))),
+    };
+    
+    // Parse value from JSON string
+    let value = serde_json::from_str::<serde_json::Value>(&filter_input.value)
+        .map_err(|e| async_graphql::Error::new(format!("Invalid filter value JSON: {}", e)))?;
+    
+    let property_value: ontology_engine::PropertyValue = serde_json::from_value(value)
+        .map_err(|e| async_graphql::Error::new(format!("Failed to parse PropertyValue: {}", e)))?;
+    
+    Ok(Filter {
+        property: filter_input.property,
+        operator,
+        value: property_value,
+        distance: filter_input.distance,
+    })
 }
 
 /// GraphQL result type for objects
@@ -887,14 +985,14 @@ pub struct ObjectResult {
     pub object_type: String,
     pub object_id: String,
     pub title: String,
-    pub properties: String, // JSON string for now - TODO: implement proper PropertyMap GraphQL type
+    pub properties: Json<Value>, // Proper JSON type instead of stringified JSON
 }
 
 /// GraphQL result type for graph traversal
 #[derive(SimpleObject)]
 pub struct TraversalResult {
     pub object_ids: Vec<String>,
-    pub aggregated_value: Option<String>, // JSON string of aggregated value
+    pub aggregated_value: Option<Json<Value>>, // Proper JSON type instead of stringified JSON
     pub count: Option<usize>,
 }
 
@@ -918,7 +1016,7 @@ pub struct PaginatedObjectResult {
 /// GraphQL result type for function calls
 #[derive(SimpleObject)]
 pub struct FunctionResult {
-    pub value: String, // JSON string of the returned PropertyValue
+    pub value: Json<Value>, // Proper JSON type instead of stringified JSON
     pub cached: bool,
 }
 

@@ -247,3 +247,4 @@ mod tests {
         assert_eq!(user_rules.len(), 1);
     }
 }
+

@@ -123,12 +123,36 @@ fn check_condition(
         ConditionOperator::GreaterThanOrEqual => compare_values(value, &condition.value, |a, b| a >= b),
         ConditionOperator::LessThanOrEqual => compare_values(value, &condition.value, |a, b| a <= b),
         ConditionOperator::In => {
-            // For "In", condition.value should be a list - simplified for now
-            false // TODO: Implement list checking
+            // For "In", condition.value should be an Array containing values to check against
+            match &condition.value {
+                PropertyValue::Array(arr) => {
+                    // Check if value is contained in the array
+                    arr.iter().any(|item| item == value)
+                }
+                _ => {
+                    // If condition.value is not an array, this is an invalid condition
+                    return Err(ValidationError::InvalidCondition(format!(
+                        "In operator requires an array value, got: {:?}",
+                        condition.value
+                    )));
+                }
+            }
         }
         ConditionOperator::NotIn => {
-            // For "NotIn", condition.value should be a list - simplified for now
-            true // TODO: Implement list checking
+            // For "NotIn", condition.value should be an Array containing values to check against
+            match &condition.value {
+                PropertyValue::Array(arr) => {
+                    // Check if value is NOT contained in the array
+                    !arr.iter().any(|item| item == value)
+                }
+                _ => {
+                    // If condition.value is not an array, this is an invalid condition
+                    return Err(ValidationError::InvalidCondition(format!(
+                        "NotIn operator requires an array value, got: {:?}",
+                        condition.value
+                    )));
+                }
+            }
         }
     };
     
@@ -194,14 +218,21 @@ mod tests {
             id: "test_action".to_string(),
             display_name: "Test Action".to_string(),
             parameters: vec![
-                Property {
-                    id: "required_param".to_string(),
-                    display_name: None,
-                    property_type: PropertyType::String,
-                    required: true,
-                    default: None,
-                    validation: None,
-                },
+            Property {
+                id: "required_param".to_string(),
+                display_name: None,
+                property_type: PropertyType::String,
+                required: true,
+                default: None,
+                validation: None,
+                description: None,
+                annotations: std::collections::HashMap::new(),
+                unit: None,
+                format: None,
+                sensitivity_tags: vec![],
+                pii: false,
+                deprecated: None,
+            },
             ],
             logic: vec![],
             validation: None,

@@ -112,7 +112,7 @@ export default function EnhancedPersonSearch() {
   // Filter results by search text
   const filteredResults = data?.searchObjects?.filter((obj: any) => {
     if (!searchText) return true;
-    const props = typeof obj.properties === 'string' ? JSON.parse(obj.properties) : obj.properties;
+    const props = parseProperties(obj.properties);
     const searchLower = searchText.toLowerCase();
     return (
       obj.title?.toLowerCase().includes(searchLower) ||
@@ -243,7 +243,7 @@ export default function EnhancedPersonSearch() {
               <>
                 <div className="max-h-96 overflow-y-auto space-y-2">
                   {filteredResults.map((obj: any) => {
-                    const props = typeof obj.properties === 'string' ? JSON.parse(obj.properties) : obj.properties;
+                    const props = parseProperties(obj.properties);
                     return (
                       <div key={obj.objectId} className="p-3 border rounded hover:bg-gray-50">
                         <div className="flex justify-between items-start">
@@ -301,6 +301,7 @@ export default function EnhancedPersonSearch() {
     </div>
   );
 }
+
 
 
 

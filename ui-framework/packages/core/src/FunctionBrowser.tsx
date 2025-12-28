@@ -47,7 +47,10 @@ export function FunctionBrowser({ onResult }: FunctionBrowserProps) {
   const [executeFunction, { loading: executing }] = useMutation(EXECUTE_FUNCTION, {
     client,
     onCompleted: (data) => {
-      const result = JSON.parse(data.executeFunction.value);
+      // Value is already a JSON object (Json type), but may be serialized
+      const result = typeof data.executeFunction.value === 'string' 
+        ? JSON.parse(data.executeFunction.value)
+        : data.executeFunction.value;
       setExecutionResult(result);
       onResult?.(result);
     },
@@ -167,3 +170,4 @@ export function FunctionBrowser({ onResult }: FunctionBrowserProps) {
     </div>
   );
 }
+

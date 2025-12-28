@@ -15,8 +15,17 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 elasticsearch = { version = "8.19.0-alpha.1" }
+reqwest = { version = "0.11", features = ["json"] }
 url = "2.5"
 dgraph-tonic = "0.11"
+polars = { version = "0.36", features = ["lazy", "parquet", "json", "serde", "dtype-struct"] }
 
+[[test]]
+name = "unit_test"
+path = "tests/unit_test.rs"
+
+[[test]]
+name = "store_test"
+path = "tests/store_test.rs"
 
 

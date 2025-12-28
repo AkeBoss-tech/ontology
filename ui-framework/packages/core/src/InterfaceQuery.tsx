@@ -150,3 +150,4 @@ export function InterfaceQuery({ onSelectObject }: InterfaceQueryProps) {
     </div>
   );
 }
+

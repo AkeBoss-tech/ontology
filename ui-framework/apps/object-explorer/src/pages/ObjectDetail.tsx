@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, gql } from '@apollo/client';
-import { useOntology, BreadcrumbNav, PropertyMetadataDisplay, DataTable } from '@ontology/core';
+import { useOntology, BreadcrumbNav, PropertyMetadataDisplay, DataTable, parseProperties } from '@ontology/core';
 
 const GET_OBJECT = gql`
   query GetObject($objectType: String!, $objectId: String!) {
@@ -57,7 +57,7 @@ export default function ObjectDetail({ objectType, objectId, onBack }: ObjectDet
   });
 
   const object = objectData?.getObject;
-  const properties = object ? JSON.parse(object.properties) : {};
+  const properties = object ? parseProperties(object.properties) : {};
   const linkedObjects = linkedData?.getLinkedObjects || [];
 
   const breadcrumbs = [

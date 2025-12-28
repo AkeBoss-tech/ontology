@@ -97,7 +97,7 @@ export function MapView({
     const values: number[] = [];
     data.searchObjects.forEach((obj: any) => {
       try {
-        const props = typeof obj.properties === 'string' ? JSON.parse(obj.properties) : obj.properties;
+        const props = parseProperties(obj.properties);
         const geojsonStr = props[geojsonProperty];
         const value = props[valueProperty];
         if (geojsonStr && value !== undefined && value !== null) {
@@ -122,7 +122,7 @@ export function MapView({
     // Add GeoJSON layers
     data.searchObjects.forEach((obj: any) => {
       try {
-        const props = typeof obj.properties === 'string' ? JSON.parse(obj.properties) : obj.properties;
+        const props = parseProperties(obj.properties);
         const geojsonStr = props[geojsonProperty];
         if (!geojsonStr) return;
 

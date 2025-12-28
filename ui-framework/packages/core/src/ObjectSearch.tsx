@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, gql } from '@apollo/client';
 import { useOntology } from './OntologyProvider';
+import { parseProperties } from './utils';
 
 const SEARCH_OBJECTS = gql`
   query SearchObjects($objectType: String!, $filters: [FilterInput!], $limit: Int, $offset: Int) {
@@ -85,6 +86,7 @@ export function ObjectSearch({ objectType, onSelectObject }: ObjectSearchProps) 
     </div>
   );
 }
+
 
 
 

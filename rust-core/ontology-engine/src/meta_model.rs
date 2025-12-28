@@ -516,6 +516,13 @@ mod tests {
                     required: true,
                     default: None,
                     validation: None,
+                    description: None,
+                    annotations: std::collections::HashMap::new(),
+                    unit: None,
+                    format: None,
+                    sensitivity_tags: vec![],
+                    pii: false,
+                    deprecated: None,
                 },
                 Property {
                     id: "name".to_string(),
@@ -524,10 +531,18 @@ mod tests {
                     required: false,
                     default: None,
                     validation: None,
+                    description: None,
+                    annotations: std::collections::HashMap::new(),
+                    unit: None,
+                    format: None,
+                    sensitivity_tags: vec![],
+                    pii: false,
+                    deprecated: None,
                 },
             ],
             backing_datasource: None,
             title_key: Some("name".to_string()),
+            implements: vec![],
         }
     }
     

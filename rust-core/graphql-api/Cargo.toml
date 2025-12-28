@@ -26,3 +26,11 @@ async-graphql-axum = "5.0"
 axum = "0.7"
 lazy_static = "1.4"
 
+[[test]]
+name = "resolvers_test"
+path = "tests/resolvers_test.rs"
+
+[[test]]
+name = "integration_test"
+path = "tests/integration_test.rs"
+

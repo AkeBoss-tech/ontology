@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MapView } from '@ontology/map';
 import { TimeSlider } from '@ontology/map';
 import { useQuery, gql } from '@apollo/client';
-import { useOntology, useVisualizationManager } from '@ontology/core';
+import { useOntology, useVisualizationManager, parseProperties } from '@ontology/core';
 import LoadVisualizationButton from '../components/LoadVisualizationButton';
 import { VisualizationConfig } from '@ontology/core';
 
@@ -173,8 +173,7 @@ export default function EnhancedMap() {
   const getMapCenter = (): [number, number] => {
     if (selectedObjectData?.searchObjects?.[0]) {
       const props = typeof selectedObjectData.searchObjects[0].properties === 'string'
-        ? JSON.parse(selectedObjectData.searchObjects[0].properties)
-        : selectedObjectData.searchObjects[0].properties;
+        parseProperties(selectedObjectData.searchObjects[0].properties);
       if (props.centroid_lon && props.centroid_lat) {
         return [props.centroid_lon, props.centroid_lat];
       }

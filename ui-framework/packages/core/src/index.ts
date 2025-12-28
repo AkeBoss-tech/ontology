@@ -9,6 +9,7 @@ export { DataTable } from './DataTable';
 export { BreadcrumbNav } from './BreadcrumbNav';
 export { PropertyMetadataDisplay } from './PropertyMetadataDisplay';
 export { VisualizationManagerProvider, useVisualizationManager } from './VisualizationManager';
+export { parseProperties, isPropertiesString, getPropertiesAsObject } from './utils';
 export type { PropertyDefinition, PropertyEditorProps } from './PropertyEditor';
 export type { FunctionBrowserProps } from './FunctionBrowser';
 export type { InterfaceQueryProps } from './InterfaceQuery';

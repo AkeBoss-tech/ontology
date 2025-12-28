@@ -126,6 +126,10 @@ async fn main() {
     // Create hydrator
     let hydrator = ObjectHydrator::new();
     
+    // Create function result cache
+    let function_cache: Arc<tokio::sync::RwLock<HashMap<u64, ontology_engine::PropertyValue>>> = 
+        Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+    
     // Create GraphQL schema
     let schema = Schema::build(QueryRoot::default(), AdminMutations::default(), EmptySubscription)
         .data(Arc::new(ontology))
@@ -135,6 +139,7 @@ async fn main() {
         .data(time_query.clone())
         .data(hydrator)
         .data(DATA_STORE.clone())
+        .data(function_cache)
         .finish();
     
     // GraphQL handler
