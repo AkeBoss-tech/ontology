@@ -3,7 +3,17 @@ export { createOntologyClient, gql } from './GraphQLClient';
 export { ObjectBrowser } from './ObjectBrowser';
 export { ObjectSearch } from './ObjectSearch';
 export { PropertyEditor } from './PropertyEditor';
+export { FunctionBrowser } from './FunctionBrowser';
+export { InterfaceQuery } from './InterfaceQuery';
+export { DataTable } from './DataTable';
+export { BreadcrumbNav } from './BreadcrumbNav';
+export { PropertyMetadataDisplay } from './PropertyMetadataDisplay';
 export { VisualizationManagerProvider, useVisualizationManager } from './VisualizationManager';
 export type { PropertyDefinition, PropertyEditorProps } from './PropertyEditor';
+export type { FunctionBrowserProps } from './FunctionBrowser';
+export type { InterfaceQueryProps } from './InterfaceQuery';
+export type { DataTableProps, Column } from './DataTable';
+export type { BreadcrumbNavProps, BreadcrumbItem } from './BreadcrumbNav';
+export type { PropertyMetadata, PropertyMetadataDisplayProps } from './PropertyMetadataDisplay';
 export type { VisualizationConfig } from './VisualizationManager';
 

@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "react": "^18.2.0",
-    "@ontology/core": "*"
+    "@ontology/core": "*",
+    "@heroicons/react": "^2.0.18"
   },
   "devDependencies": {
     "@types/react": "^18.2.45",

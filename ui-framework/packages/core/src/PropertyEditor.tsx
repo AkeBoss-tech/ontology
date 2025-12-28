@@ -1,4 +1,124 @@
 import React, { useState, useEffect } from 'react';
+import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+
+// Array Editor Component
+function ArrayEditor({ value, onChange, elementType }: { value: any[]; onChange: (value: any[]) => void; elementType: string }) {
+  const addItem = () => {
+    const defaultValue = elementType === 'number' || elementType === 'integer' ? 0 : '';
+    onChange([...value, defaultValue]);
+  };
+
+  const removeItem = (index: number) => {
+    onChange(value.filter((_, i) => i !== index));
+  };
+
+  const updateItem = (index: number, newValue: any) => {
+    const newArray = [...value];
+    newArray[index] = newValue;
+    onChange(newArray);
+  };
+
+  return (
+    <div className="array-editor space-y-2">
+      {value.map((item, index) => (
+        <div key={index} className="flex gap-2 items-center">
+          <input
+            type={elementType === 'number' || elementType === 'integer' ? 'number' : 'text'}
+            value={item}
+            onChange={(e) => {
+              const newValue = elementType === 'number' || elementType === 'integer' 
+                ? (elementType === 'integer' ? parseInt(e.target.value) || 0 : parseFloat(e.target.value) || 0)
+                : e.target.value;
+              updateItem(index, newValue);
+            }}
+            className="flex-1 px-3 py-2 border rounded"
+            placeholder={`Item ${index + 1}`}
+          />
+          <button
+            onClick={() => removeItem(index)}
+            className="p-2 text-red-500 hover:bg-red-50 rounded"
+          >
+            <TrashIcon className="w-4 h-4" />
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={addItem}
+        className="flex items-center gap-1 px-3 py-1 text-sm border rounded hover:bg-gray-50"
+      >
+        <PlusIcon className="w-4 h-4" />
+        Add Item
+      </button>
+    </div>
+  );
+}
+
+// Map/Object Editor Component
+function MapEditor({ value, onChange }: { value: Record<string, any>; onChange: (value: Record<string, any>) => void }) {
+  const [entries, setEntries] = useState<Array<{ key: string; value: any }>>(
+    Object.entries(value).map(([k, v]) => ({ key: k, value: v }))
+  );
+
+  useEffect(() => {
+    const newValue: Record<string, any> = {};
+    entries.forEach(({ key, value: val }) => {
+      if (key) {
+        newValue[key] = val;
+      }
+    });
+    onChange(newValue);
+  }, [entries, onChange]);
+
+  const addEntry = () => {
+    setEntries([...entries, { key: '', value: '' }]);
+  };
+
+  const removeEntry = (index: number) => {
+    setEntries(entries.filter((_, i) => i !== index));
+  };
+
+  const updateEntry = (index: number, field: 'key' | 'value', newValue: any) => {
+    const newEntries = [...entries];
+    newEntries[index] = { ...newEntries[index], [field]: newValue };
+    setEntries(newEntries);
+  };
+
+  return (
+    <div className="map-editor space-y-2">
+      {entries.map((entry, index) => (
+        <div key={index} className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={entry.key}
+            onChange={(e) => updateEntry(index, 'key', e.target.value)}
+            placeholder="Key"
+            className="w-1/3 px-3 py-2 border rounded"
+          />
+          <input
+            type="text"
+            value={entry.value}
+            onChange={(e) => updateEntry(index, 'value', e.target.value)}
+            placeholder="Value"
+            className="flex-1 px-3 py-2 border rounded"
+          />
+          <button
+            onClick={() => removeEntry(index)}
+            className="p-2 text-red-500 hover:bg-red-50 rounded"
+          >
+            <TrashIcon className="w-4 h-4" />
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={addEntry}
+        className="flex items-center gap-1 px-3 py-1 text-sm border rounded hover:bg-gray-50"
+      >
+        <PlusIcon className="w-4 h-4" />
+        Add Entry
+      </button>
+    </div>
+  );
+}
 
 export interface PropertyDefinition {
   id: string;
@@ -112,7 +232,41 @@ export function PropertyEditor({ properties, values, onChange }: PropertyEditorP
             required={prop.required}
           />
         );
+      case 'array':
+        return (
+          <ArrayEditor
+            value={Array.isArray(value) ? value : []}
+            onChange={(newArray) => handleChange(prop.id, newArray)}
+            elementType={prop.validation?.enumValues?.[0] || 'string'}
+          />
+        );
+      case 'map':
+      case 'object':
+        return (
+          <MapEditor
+            value={typeof value === 'object' && value !== null && !Array.isArray(value) ? value : {}}
+            onChange={(newMap) => handleChange(prop.id, newMap)}
+          />
+        );
       default:
+        // Check if type contains "array" or "map"
+        if (prop.type.toLowerCase().includes('array')) {
+          return (
+            <ArrayEditor
+              value={Array.isArray(value) ? value : []}
+              onChange={(newArray) => handleChange(prop.id, newArray)}
+              elementType={prop.type.toLowerCase().replace('array', '').trim() || 'string'}
+            />
+          );
+        }
+        if (prop.type.toLowerCase().includes('map') || prop.type.toLowerCase().includes('object')) {
+          return (
+            <MapEditor
+              value={typeof value === 'object' && value !== null && !Array.isArray(value) ? value : {}}
+              onChange={(newMap) => handleChange(prop.id, newMap)}
+            />
+          );
+        }
         return (
           <input
             type="text"

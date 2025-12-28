@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::property::Property;
+use crate::property::{Property, PropertyType};
 use crate::link::LinkCardinality;
 
 /// Core meta-model representing the ontology configuration
@@ -21,6 +21,47 @@ pub struct OntologyDef {
     #[serde(rename = "actionTypes")]
     #[serde(default)]
     pub action_types: Vec<ActionTypeDef>,
+    
+    #[serde(rename = "interfaces")]
+    #[serde(default)]
+    pub interfaces: Vec<InterfaceDef>,
+    
+    #[serde(rename = "functionTypes")]
+    #[serde(default)]
+    pub function_types: Vec<FunctionTypeDef>,
+}
+
+/// Interface definition - represents a contract that object types can implement
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterfaceDef {
+    pub id: String,
+    
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    
+    #[serde(default)]
+    pub properties: Vec<Property>,
+    
+    #[serde(rename = "requiredLinkTypes")]
+    #[serde(default)]
+    pub required_link_types: Vec<String>,
+}
+
+impl InterfaceDef {
+    /// Validate that the interface definition is valid
+    pub fn validate(&self) -> Result<(), String> {
+        // Check for duplicate property IDs
+        let mut seen = std::collections::HashSet::new();
+        for prop in &self.properties {
+            if !seen.insert(&prop.id) {
+                return Err(format!(
+                    "Duplicate property ID '{}' in interface '{}'",
+                    prop.id, self.id
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Object Type - represents a real-world concept in the system
@@ -43,6 +84,10 @@ pub struct ObjectType {
     #[serde(rename = "titleKey")]
     #[serde(default)]
     pub title_key: Option<String>,
+    
+    #[serde(rename = "implements")]
+    #[serde(default)]
+    pub implements: Vec<String>, // List of interface IDs this object type implements
 }
 
 impl ObjectType {
@@ -70,6 +115,28 @@ impl ObjectType {
                     prop.id, self.id
                 ));
             }
+        }
+        
+        // Note: Interface implementation validation happens at ontology level
+        // where we have access to interface definitions
+        
+        Ok(())
+    }
+    
+    /// Validate that this object type implements all declared interfaces
+    pub fn validate_interface_implementations(
+        &self,
+        interfaces: &std::collections::HashMap<String, InterfaceDef>,
+    ) -> Result<(), String> {
+        use crate::interface::InterfaceValidator;
+        for interface_id in &self.implements {
+            let interface = interfaces.get(interface_id)
+                .ok_or_else(|| format!(
+                    "Object type '{}' declares implementation of interface '{}' which does not exist",
+                    self.id, interface_id
+                ))?;
+            
+            InterfaceValidator::validate_implements(self, interface)?;
         }
         
         Ok(())
@@ -140,12 +207,144 @@ pub struct ActionTypeDef {
     pub side_effects: Vec<crate::action::ActionSideEffect>,
 }
 
+/// Function return type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FunctionReturnType {
+    Property {
+        property_type: PropertyType,
+    },
+    ObjectType {
+        object_type: String,
+    },
+    Array {
+        element_type: Box<FunctionReturnType>,
+    },
+}
+
+/// Aggregation type for function logic
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AggregationType {
+    Sum,
+    Avg,
+    Count,
+    Min,
+    Max,
+}
+
+/// Function filter for link traversal
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionFilter {
+    pub property: String,
+    pub operator: String,
+    pub value: crate::property::PropertyValue,
+}
+
+/// Function logic definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FunctionLogic {
+    Aggregation {
+        #[serde(rename = "linkType")]
+        link_type: String,
+        aggregation: AggregationType,
+        property: String,
+    },
+    LinkTraversal {
+        #[serde(rename = "linkType")]
+        link_type: String,
+        #[serde(rename = "targetType")]
+        target_type: String,
+        filter: Option<FunctionFilter>,
+    },
+    PropertyAccess {
+        property: String,
+    },
+}
+
+/// Function Type definition - represents a function that returns typed data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionTypeDef {
+    pub id: String,
+    
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    
+    #[serde(default)]
+    pub description: Option<String>,
+    
+    #[serde(default)]
+    pub parameters: Vec<Property>,
+    
+    #[serde(rename = "returnType")]
+    pub return_type: FunctionReturnType,
+    
+    pub logic: FunctionLogic,
+    
+    #[serde(default)]
+    pub cacheable: bool,
+}
+
+impl FunctionTypeDef {
+    /// Validate that the function definition is valid
+    pub fn validate(&self, object_type_ids: &[String], link_type_ids: &[String]) -> Result<(), String> {
+        // Validate return type references exist
+        match &self.return_type {
+            FunctionReturnType::ObjectType { object_type } => {
+                if !object_type_ids.contains(object_type) {
+                    return Err(format!(
+                        "Function '{}' return type references unknown object type '{}'",
+                        self.id, object_type
+                    ));
+                }
+            }
+            FunctionReturnType::Array { element_type } => {
+                // Recursively validate array element type
+                // For now, we'll just check that it's valid (simplified)
+            }
+            _ => {}
+        }
+        
+        // Validate logic references
+        match &self.logic {
+            FunctionLogic::LinkTraversal { link_type, target_type, .. } => {
+                if !link_type_ids.contains(link_type) {
+                    return Err(format!(
+                        "Function '{}' logic references unknown link type '{}'",
+                        self.id, link_type
+                    ));
+                }
+                if !object_type_ids.contains(target_type) {
+                    return Err(format!(
+                        "Function '{}' logic references unknown target type '{}'",
+                        self.id, target_type
+                    ));
+                }
+            }
+            FunctionLogic::Aggregation { link_type, .. } => {
+                if !link_type_ids.contains(link_type) {
+                    return Err(format!(
+                        "Function '{}' logic references unknown link type '{}'",
+                        self.id, link_type
+                    ));
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(())
+    }
+}
+
 /// The runtime ontology state
 pub struct OntologyRuntime {
     config: OntologyConfig,
     object_types: HashMap<String, ObjectType>,
     link_types: HashMap<String, LinkTypeDef>,
     action_types: HashMap<String, ActionTypeDef>,
+    interfaces: HashMap<String, InterfaceDef>,
+    function_types: HashMap<String, FunctionTypeDef>,
 }
 
 impl OntologyRuntime {
@@ -162,9 +361,37 @@ impl OntologyRuntime {
             object_type.validate()?;
         }
         
+        // Build interfaces map first (needed for interface validation)
+        let interfaces: HashMap<String, InterfaceDef> = ontology_def.interfaces
+            .iter()
+            .cloned()
+            .map(|i| (i.id.clone(), i))
+            .collect();
+        
+        // Validate interface implementations for all object types
+        for object_type in &ontology_def.object_types {
+            object_type.validate_interface_implementations(&interfaces)?;
+        }
+        
         // Validate all link types
         for link_type in &ontology_def.link_types {
             link_type.validate(&object_type_ids)?;
+        }
+        
+        // Validate all interfaces
+        let interface_ids: Vec<String> = ontology_def.interfaces.iter()
+            .map(|i| i.id.clone())
+            .collect();
+        for interface in &ontology_def.interfaces {
+            interface.validate()?;
+        }
+        
+        // Validate all function types
+        let link_type_ids: Vec<String> = ontology_def.link_types.iter()
+            .map(|lt| lt.id.clone())
+            .collect();
+        for function_type in &ontology_def.function_types {
+            function_type.validate(&object_type_ids, &link_type_ids)?;
         }
         
         // Build hash maps for efficient lookup
@@ -186,11 +413,19 @@ impl OntologyRuntime {
             .map(|at| (at.id.clone(), at))
             .collect();
         
+        let function_types: HashMap<String, FunctionTypeDef> = ontology_def.function_types
+            .iter()
+            .cloned()
+            .map(|ft| (ft.id.clone(), ft))
+            .collect();
+        
         Ok(Self {
             config: OntologyConfig { ontology: ontology_def },
             object_types,
             link_types,
             action_types,
+            interfaces,
+            function_types,
         })
     }
     
@@ -236,6 +471,27 @@ impl OntologyRuntime {
     /// Get all action types
     pub fn action_types(&self) -> impl Iterator<Item = &ActionTypeDef> {
         self.action_types.values()
+    }
+    
+    /// Get an interface by ID
+    pub fn get_interface(&self, id: &str) -> Option<&InterfaceDef> {
+        self.interfaces.get(id)
+    }
+    
+    /// Get all interfaces
+    pub fn interfaces(&self) -> impl Iterator<Item = &InterfaceDef> {
+        self.interfaces.values()
+    }
+    
+    /// Get a function type by ID
+    pub fn get_function_type(&self, id: &str) -> Option<&FunctionTypeDef> {
+        self.function_types.get(id)
+    }
+    
+    
+    /// Get all function types
+    pub fn function_types(&self) -> impl Iterator<Item = &FunctionTypeDef> {
+        self.function_types.values()
     }
 }
 

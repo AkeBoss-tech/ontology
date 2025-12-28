@@ -245,6 +245,18 @@ impl ActionExecutor {
                 PropertyValue::DateTime(dt) => dt.clone(),
                 PropertyValue::ObjectReference(id) => id.clone(),
                 PropertyValue::GeoJSON(gj) => gj.clone(),
+                PropertyValue::Array(_) => {
+                    // Serialize array to JSON string
+                    serde_json::to_string(value).unwrap_or_else(|_| "[]".to_string())
+                }
+                PropertyValue::Map(_) => {
+                    // Serialize map to JSON string
+                    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+                }
+                PropertyValue::Object(_) => {
+                    // Serialize object to JSON string
+                    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+                }
                 PropertyValue::Null => "null".to_string(),
             };
             

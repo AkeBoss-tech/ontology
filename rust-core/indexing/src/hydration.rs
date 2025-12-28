@@ -138,6 +138,26 @@ fn property_value_to_json(value: &ontology_engine::PropertyValue) -> serde_json:
             // Parse GeoJSON string to validate, then return as JSON value
             serde_json::from_str(gj).unwrap_or_else(|_| serde_json::Value::String(gj.clone()))
         },
+        ontology_engine::PropertyValue::Array(arr) => {
+            let items: Vec<serde_json::Value> = arr.iter()
+                .map(property_value_to_json)
+                .collect();
+            serde_json::Value::Array(items)
+        },
+        ontology_engine::PropertyValue::Map(map) => {
+            let mut json_map = serde_json::Map::new();
+            for (key, value) in map {
+                json_map.insert(key.clone(), property_value_to_json(value));
+            }
+            serde_json::Value::Object(json_map)
+        },
+        ontology_engine::PropertyValue::Object(obj) => {
+            let mut json_obj = serde_json::Map::new();
+            for (key, value) in obj {
+                json_obj.insert(key.clone(), property_value_to_json(value));
+            }
+            serde_json::Value::Object(json_obj)
+        },
         ontology_engine::PropertyValue::Null => serde_json::Value::Null,
     }
 }

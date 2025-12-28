@@ -10,7 +10,8 @@
   "dependencies": {
     "react": "^18.2.0",
     "@apollo/client": "^3.8.10",
-    "graphql": "^16.8.1"
+    "graphql": "^16.8.1",
+    "@heroicons/react": "^2.0.18"
   },
   "devDependencies": {
     "@types/react": "^18.2.45",

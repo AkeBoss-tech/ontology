@@ -1,7 +1,7 @@
 use async_graphql::{Context, Object, FieldResult, InputObject, SimpleObject};
 use indexing::store::{SearchStore, GraphStore, SearchQuery, Filter};
 use indexing::hydration::ObjectHydrator;
-use ontology_engine::Ontology;
+use ontology_engine::{Ontology, FunctionExecutor, InterfaceValidator};
 use versioning::time_query;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -598,6 +598,263 @@ impl QueryRoot {
             total: result.total,
         })
     }
+    
+    /// Call a function defined in the ontology
+    async fn call_function(
+        &self,
+        ctx: &Context<'_>,
+        function_id: String,
+        parameters: HashMap<String, String>, // JSON strings representing PropertyValues
+    ) -> FieldResult<FunctionResult> {
+        let ontology = ctx.data::<Arc<Ontology>>()?;
+        let graph_store = ctx.data::<Arc<dyn GraphStore>>()?;
+        let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
+        
+        // Get function definition
+        let function_def = ontology.get_function_type(&function_id)
+            .ok_or_else(|| async_graphql::Error::new(format!("Function '{}' not found", function_id)))?;
+        
+        // Parse parameters from JSON strings to PropertyValues
+        let mut param_map = ontology_engine::PropertyMap::new();
+        for (key, json_value) in parameters {
+            let value: serde_json::Value = serde_json::from_str(&json_value)
+                .map_err(|e| async_graphql::Error::new(format!("Invalid parameter JSON for '{}': {}", key, e)))?;
+            
+            let prop_value = match value {
+                serde_json::Value::String(s) => ontology_engine::PropertyValue::String(s),
+                serde_json::Value::Number(n) => {
+                    if let Some(i) = n.as_i64() {
+                        ontology_engine::PropertyValue::Integer(i)
+                    } else if let Some(d) = n.as_f64() {
+                        ontology_engine::PropertyValue::Double(d)
+                    } else {
+                        return Err(async_graphql::Error::new(format!("Invalid number for parameter '{}'", key)));
+                    }
+                }
+                serde_json::Value::Bool(b) => ontology_engine::PropertyValue::Boolean(b),
+                serde_json::Value::Array(arr) => {
+                    let prop_values: Result<Vec<ontology_engine::PropertyValue>, _> = arr.into_iter()
+                        .map(|v| {
+                            match v {
+                                serde_json::Value::String(s) => Ok(ontology_engine::PropertyValue::String(s)),
+                                serde_json::Value::Number(n) => {
+                                    if let Some(i) = n.as_i64() {
+                                        Ok(ontology_engine::PropertyValue::Integer(i))
+                                    } else if let Some(d) = n.as_f64() {
+                                        Ok(ontology_engine::PropertyValue::Double(d))
+                                    } else {
+                                        Err("Invalid number in array")
+                                    }
+                                }
+                                serde_json::Value::Bool(b) => Ok(ontology_engine::PropertyValue::Boolean(b)),
+                                _ => Err("Unsupported array element type"),
+                            }
+                        })
+                        .collect();
+                    ontology_engine::PropertyValue::Array(prop_values
+                        .map_err(|e| async_graphql::Error::new(format!("Invalid array for parameter '{}': {:?}", key, e)))?)
+                }
+                _ => return Err(async_graphql::Error::new(format!("Unsupported parameter type for '{}'", key))),
+            };
+            
+            param_map.insert(key, prop_value);
+        }
+        
+        // Execute function
+        let result = FunctionExecutor::execute(
+            function_def,
+            &param_map,
+            None, // get_object_property callback - would need to be implemented
+            None, // get_linked_objects callback - would need to be implemented
+            None, // aggregate_linked_properties callback - would need to be implemented
+        ).await
+        .map_err(|e| async_graphql::Error::new(format!("Function execution error: {}", e)))?;
+        
+        Ok(FunctionResult {
+            value: serde_json::to_string(&result.value).unwrap_or_else(|_| "null".to_string()),
+            cached: false, // TODO: Implement caching
+        })
+    }
+    
+    /// Query objects implementing an interface (polymorphic query)
+    async fn query_interface(
+        &self,
+        ctx: &Context<'_>,
+        interface_id: String,
+        filters: Option<Vec<FilterInput>>,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> FieldResult<Vec<ObjectResult>> {
+        let ontology = ctx.data::<Arc<Ontology>>()?;
+        let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
+        let hydrator = ctx.data::<ObjectHydrator>()?;
+        
+        // Get interface definition
+        let interface = ontology.get_interface(&interface_id)
+            .ok_or_else(|| async_graphql::Error::new(format!("Interface '{}' not found", interface_id)))?;
+        
+        // Get all object types that implement this interface
+        let implementers = InterfaceValidator::get_implementers(
+            &interface_id,
+            ontology.object_types(),
+        );
+        
+        if implementers.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Query each implementing object type and combine results
+        let mut all_results = Vec::new();
+        for object_type in implementers {
+            // Build filters (simplified - would need proper filter conversion)
+            let query = SearchQuery {
+                filters: vec![], // TODO: Convert FilterInput to Filter for each object type
+                sort: None,
+                limit,
+                offset,
+            };
+            
+            // Search objects of this type
+            let indexed_objects = search_store.search(&object_type.id, &query).await
+                .map_err(|e| async_graphql::Error::new(format!("Search error: {}", e)))?;
+            
+            // Hydrate and add to results
+            let hydrated = hydrator.hydrate_batch(&indexed_objects, object_type)
+                .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
+            
+            for h in hydrated {
+                all_results.push(ObjectResult {
+                    object_type: h.object_type,
+                    object_id: h.object_id,
+                    title: h.title,
+                    properties: serde_json::to_string(&h.properties).unwrap_or_else(|_| "{}".to_string()),
+                });
+            }
+        }
+        
+        Ok(all_results)
+    }
+    
+    /// Get all available functions
+    async fn get_functions(
+        &self,
+        ctx: &Context<'_>,
+    ) -> FieldResult<Vec<FunctionDefinition>> {
+        let ontology = ctx.data::<Arc<Ontology>>()?;
+        
+        let functions: Vec<FunctionDefinition> = ontology
+            .function_types()
+            .map(|f| {
+                let parameters: Vec<PropertyOutput> = f.parameters.iter().map(|p| {
+                    PropertyOutput {
+                        id: p.id.clone(),
+                        display_name: p.display_name.clone(),
+                        property_type: format!("{:?}", p.property_type),
+                        required: p.required,
+                    }
+                }).collect();
+                
+                FunctionDefinition {
+                    id: f.id.clone(),
+                    display_name: f.display_name.clone(),
+                    description: f.description.clone(),
+                    parameters,
+                    return_type: format!("{:?}", f.return_type),
+                    cacheable: f.cacheable,
+                }
+            })
+            .collect();
+        
+        Ok(functions)
+    }
+    
+    /// Execute a function with parameters
+    async fn execute_function(
+        &self,
+        ctx: &Context<'_>,
+        function_id: String,
+        parameters: HashMap<String, String>, // JSON strings
+    ) -> FieldResult<FunctionResult> {
+        // Use existing call_function implementation
+        self.call_function(ctx, function_id, parameters).await
+    }
+    
+    /// Get all available interfaces
+    async fn get_interfaces(
+        &self,
+        ctx: &Context<'_>,
+    ) -> FieldResult<Vec<InterfaceDefinition>> {
+        let ontology = ctx.data::<Arc<Ontology>>()?;
+        
+        let interfaces: Vec<InterfaceDefinition> = ontology
+            .interfaces()
+            .map(|i| {
+                let properties: Vec<PropertyOutput> = i.properties.iter().map(|p| {
+                    PropertyOutput {
+                        id: p.id.clone(),
+                        display_name: p.display_name.clone(),
+                        property_type: format!("{:?}", p.property_type),
+                        required: p.required,
+                    }
+                }).collect();
+                
+                // Get implementers
+                let implementers: Vec<ImplementerInfo> = InterfaceValidator::get_implementers(
+                    &i.id,
+                    ontology.object_types(),
+                )
+                .iter()
+                .map(|ot| {
+                    // Count would need to come from search store - simplified for now
+                    ImplementerInfo {
+                        object_type: ot.id.clone(),
+                        count: 0, // TODO: Get actual count from search store
+                    }
+                })
+                .collect();
+                
+                InterfaceDefinition {
+                    id: i.id.clone(),
+                    display_name: i.display_name.clone(),
+                    properties,
+                    implementers,
+                }
+            })
+            .collect();
+        
+        Ok(interfaces)
+    }
+    
+    /// Query objects by interface (alias for query_interface)
+    async fn query_by_interface(
+        &self,
+        ctx: &Context<'_>,
+        interface_id: String,
+        filters: Option<Vec<FilterInput>>,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> FieldResult<Vec<ObjectResult>> {
+        // Use existing query_interface implementation
+        self.query_interface(ctx, interface_id, filters, limit, offset).await
+    }
+    
+    /// Get all object types
+    async fn get_object_types(
+        &self,
+        ctx: &Context<'_>,
+    ) -> FieldResult<Vec<ObjectTypeResult>> {
+        let ontology = ctx.data::<Arc<Ontology>>()?;
+        
+        let object_types: Vec<ObjectTypeResult> = ontology
+            .object_types()
+            .map(|ot| ObjectTypeResult {
+                id: ot.id.clone(),
+                display_name: ot.display_name.clone(),
+            })
+            .collect();
+        
+        Ok(object_types)
+    }
 }
 
 
@@ -656,5 +913,74 @@ pub struct PaginatedObjectResult {
     pub items: Vec<ObjectResult>,
     pub page_info: PageInfo,
     pub total_count: usize,
+}
+
+/// GraphQL result type for function calls
+#[derive(SimpleObject)]
+pub struct FunctionResult {
+    pub value: String, // JSON string of the returned PropertyValue
+    pub cached: bool,
+}
+
+/// GraphQL result type for object types
+#[derive(SimpleObject)]
+pub struct ObjectTypeResult {
+    pub id: String,
+    #[graphql(name = "displayName")]
+    pub display_name: String,
+}
+
+/// GraphQL result type for property definitions (output)
+#[derive(SimpleObject, Clone)]
+pub struct PropertyOutput {
+    pub id: String,
+    #[graphql(name = "displayName")]
+    pub display_name: Option<String>,
+    #[graphql(name = "type")]
+    pub property_type: String,
+    pub required: bool,
+}
+
+/// GraphQL input for function parameters
+#[derive(InputObject, Clone)]
+pub struct PropertyInput {
+    pub id: String,
+    #[graphql(name = "displayName")]
+    pub display_name: Option<String>,
+    #[graphql(name = "type")]
+    pub property_type: String,
+    pub required: bool,
+}
+
+/// GraphQL result type for function definitions
+#[derive(SimpleObject)]
+pub struct FunctionDefinition {
+    pub id: String,
+    #[graphql(name = "displayName")]
+    pub display_name: String,
+    pub description: Option<String>,
+    pub parameters: Vec<PropertyOutput>,
+    #[graphql(name = "returnType")]
+    pub return_type: String,
+    pub cacheable: bool,
+}
+
+/// GraphQL result type for interface definitions
+#[derive(SimpleObject)]
+pub struct InterfaceDefinition {
+    pub id: String,
+    #[graphql(name = "displayName")]
+    pub display_name: String,
+    pub properties: Vec<PropertyOutput>,
+    #[graphql(name = "implementers")]
+    pub implementers: Vec<ImplementerInfo>,
+}
+
+/// GraphQL result for interface implementers
+#[derive(SimpleObject)]
+pub struct ImplementerInfo {
+    #[graphql(name = "objectType")]
+    pub object_type: String,
+    pub count: usize,
 }
 
