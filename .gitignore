@@ -48,4 +48,18 @@ Thumbs.db
 *.env
 
 
+# ignore markdown files in just the root directory
 *.md
+!README.md
+!ARCHITECTURE.md
+!APPLICATION_GUIDE.md
+!CONTRIBUTING.md
+!CODE_OF_CONDUCT.md
+!SECURITY.md
+!LICENSE.md
+!CHANGELOG.md
+!CONTRIBUTORS.md
+!CODE_OF_CONDUCT.md
+!SECURITY.md
+!LICENSE.md
+!CHANGELOG.md

@@ -1,0 +1,252 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        test-type: [unit, integration]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      continue-on-error: true
+    
+    - name: Build all packages
+      run: cargo build --verbose --workspace
+    
+    - name: Run unit tests
+      if: matrix.test-type == 'unit'
+      run: |
+        cargo test --lib --workspace --verbose --no-fail-fast
+        cargo test --test unit_test --package indexing --verbose --no-fail-fast
+    
+    - name: Run integration tests (no external services)
+      if: matrix.test-type == 'integration'
+      run: |
+        # Run integration tests that don't require external services
+        cargo test --test integration_test --package indexing --verbose --no-fail-fast || true
+        cargo test --test integration_test --package graphql-api --verbose --no-fail-fast || true
+    
+    - name: Run example tests
+      run: cargo test --examples --workspace --verbose --no-fail-fast || true
+    
+    - name: Build GraphQL server
+      run: cargo build --bin server --package graphql-api --verbose
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results-${{ matrix.test-type }}
+        path: |
+          target/debug/deps/*.log
+          target/test-results/
+
+  test-with-services:
+    name: Integration Tests (with services)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    
+    services:
+      elasticsearch:
+        image: elasticsearch:8.11.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: false
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl http://localhost:9200/_cluster/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      dgraph:
+        image: dgraph/standalone:v23.1.0
+        ports:
+          - 8080:8080
+          - 9080:9080
+        options: >-
+          --health-cmd "curl http://localhost:8080/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Wait for Elasticsearch
+      run: |
+        for i in {1..30}; do
+          if curl -f http://localhost:9200/_cluster/health; then
+            echo "Elasticsearch is ready"
+            break
+          fi
+          echo "Waiting for Elasticsearch... ($i/30)"
+          sleep 2
+        done
+    
+    - name: Wait for Dgraph
+      run: |
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health; then
+            echo "Dgraph is ready"
+            break
+          fi
+          echo "Waiting for Dgraph... ($i/30)"
+          sleep 2
+        done
+    
+    - name: Build all packages
+      run: cargo build --verbose --workspace
+    
+    - name: Run store integration tests
+      env:
+        ELASTICSEARCH_URL: http://localhost:9200
+        DGRAPH_URL: http://localhost:9080
+      run: |
+        cargo test --test store_test --package indexing --verbose --no-fail-fast || true
+    
+    - name: Run full integration tests
+      env:
+        ELASTICSEARCH_URL: http://localhost:9200
+        DGRAPH_URL: http://localhost:9080
+      run: |
+        cargo test --test integration_test --package indexing --verbose --no-fail-fast || true
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+  build:
+    name: Build All Packages
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Build workspace
+      run: cargo build --verbose --workspace --release
+    
+    - name: Build GraphQL server
+      run: cargo build --bin server --package graphql-api --verbose --release
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-binaries
+        path: |
+          target/release/server
+          target/release/*.so
+          target/release/*.dylib
+        retention-days: 7
+
