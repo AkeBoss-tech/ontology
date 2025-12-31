@@ -1,0 +1,36 @@
+services:
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: ontology-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ontology-network
+
+  dgraph:
+    image: dgraph/standalone:v23.1.0
+    container_name: ontology-dgraph
+    ports:
+      - "${DGRAPH_HTTP_PORT:-8081}:8080"  # Map Dgraph HTTP API to avoid conflict with GraphQL server
+      - "${DGRAPH_GRPC_PORT:-9080}:9080"  # gRPC port
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ontology-network
+
+networks:
+  ontology-network:
+    driver: bridge
+

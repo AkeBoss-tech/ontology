@@ -1,12 +1,16 @@
-.PHONY: help backend frontend dev install build clean stop all
+.PHONY: help install install-backend install-frontend services-up services-down services-logs services-status backend frontend dev start build build-backend build-frontend clean stop kill test object-explorer object-views vertex map-app financial-portfolio census-example
 
 # Default target
 .DEFAULT_GOAL := help
 
-# Configuration
+# Configuration - Ports can be overridden via environment variables
 BACKEND_PORT ?= 8080
 FRONTEND_PORT ?= 3000
-APP_NAME ?= object-explorer
+ELASTICSEARCH_PORT ?= 9200
+DGRAPH_HTTP_PORT ?= 8081
+DGRAPH_GRPC_PORT ?= 9080
+APP_NAME ?= census-example
+ONTOLOGY_PATH ?= examples/census/config/census_ontology.yaml
 
 # Colors for output
 BLUE := \033[0;34m
@@ -17,24 +21,39 @@ NC := \033[0m # No Color
 help: ## Show this help message
 	@echo "$(BLUE)Ontology Framework - Makefile Commands$(NC)"
 	@echo ""
+	@echo "$(GREEN)Configuration (can be overridden via environment variables):$(NC)"
+	@echo "  BACKEND_PORT=$(BACKEND_PORT)"
+	@echo "  FRONTEND_PORT=$(FRONTEND_PORT)"
+	@echo "  ELASTICSEARCH_PORT=$(ELASTICSEARCH_PORT)"
+	@echo "  DGRAPH_HTTP_PORT=$(DGRAPH_HTTP_PORT)"
+	@echo "  DGRAPH_GRPC_PORT=$(DGRAPH_GRPC_PORT)"
+	@echo "  APP_NAME=$(APP_NAME)"
+	@echo "  ONTOLOGY_PATH=$(ONTOLOGY_PATH)"
+	@echo ""
 	@echo "$(GREEN)Setup:$(NC)"
 	@echo "  make install          Install all dependencies (Rust and Node.js)"
 	@echo "  make install-backend   Install Rust dependencies"
 	@echo "  make install-frontend  Install Node.js dependencies"
 	@echo ""
+	@echo "$(GREEN)Services:$(NC)"
+	@echo "  make services-up      Start Docker services (Elasticsearch, Dgraph)"
+	@echo "  make services-down    Stop Docker services"
+	@echo "  make services-logs    Show Docker services logs"
+	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
-	@echo "  make dev              Run both backend and frontend (default: object-explorer)"
+	@echo "  make start            Start everything (Docker services + backend + frontend)"
+	@echo "  make dev              Run both backend and frontend together"
 	@echo "  make backend          Run only the GraphQL backend server"
-	@echo "  make frontend         Run only the frontend app (default: object-explorer)"
+	@echo "  make frontend         Run only the frontend app"
 	@echo "  make frontend APP=app-name  Run specific frontend app"
 	@echo ""
 	@echo "$(GREEN)Available Frontend Apps:$(NC)"
-	@echo "  - object-explorer (default)"
+	@echo "  - object-explorer"
 	@echo "  - object-views"
 	@echo "  - vertex"
 	@echo "  - map-app"
 	@echo "  - financial-portfolio"
-	@echo "  - census-example"
+	@echo "  - census-example (default)"
 	@echo "  - ontology-manager"
 	@echo "  - foundry-rules"
 	@echo "  - machinery"
@@ -47,8 +66,13 @@ help: ## Show this help message
 	@echo ""
 	@echo "$(GREEN)Utilities:$(NC)"
 	@echo "  make clean            Clean build artifacts"
-	@echo "  make stop             Stop all running servers"
+	@echo "  make stop             Stop all running servers and Docker services"
+	@echo "  make kill             Forcefully kill all processes (aggressive cleanup)"
 	@echo "  make test             Run tests"
+	@echo ""
+	@echo "$(YELLOW)Examples:$(NC)"
+	@echo "  make start APP_NAME=census-example FRONTEND_PORT=3000"
+	@echo "  make services-up ELASTICSEARCH_PORT=9201"
 	@echo ""
 
 install: install-backend install-frontend ## Install all dependencies
@@ -71,10 +95,39 @@ install-frontend: ## Install Node.js dependencies
 	done
 	@echo "$(GREEN)✓ Frontend dependencies installed$(NC)"
 
+services-up: ## Start Docker services (Elasticsearch, Dgraph)
+	@echo "$(BLUE)Starting Docker services...$(NC)"
+	@echo "$(YELLOW)Elasticsearch: http://localhost:$(ELASTICSEARCH_PORT)$(NC)"
+	@echo "$(YELLOW)Dgraph HTTP: http://localhost:$(DGRAPH_HTTP_PORT)$(NC)"
+	@echo "$(YELLOW)Dgraph gRPC: localhost:$(DGRAPH_GRPC_PORT)$(NC)"
+	ELASTICSEARCH_PORT=$(ELASTICSEARCH_PORT) \
+	DGRAPH_HTTP_PORT=$(DGRAPH_HTTP_PORT) \
+	DGRAPH_GRPC_PORT=$(DGRAPH_GRPC_PORT) \
+	docker-compose up -d
+	@echo "$(GREEN)✓ Docker services started$(NC)"
+	@echo "$(YELLOW)Waiting for services to be healthy...$(NC)"
+	@sleep 5
+	@docker-compose ps
+
+services-down: ## Stop Docker services
+	@echo "$(BLUE)Stopping Docker services...$(NC)"
+	@docker-compose down
+	@echo "$(GREEN)✓ Docker services stopped$(NC)"
+
+services-logs: ## Show Docker services logs
+	@docker-compose logs -f
+
+services-status: ## Show Docker services status
+	@docker-compose ps
+
 backend: ## Run the GraphQL backend server
 	@echo "$(BLUE)Starting GraphQL backend on port $(BACKEND_PORT)...$(NC)"
+	@echo "$(YELLOW)Ontology: $(ONTOLOGY_PATH)$(NC)"
 	@echo "$(YELLOW)Press Ctrl+C to stop$(NC)"
-	cd rust-core && cargo run --bin server
+	cd rust-core/graphql-api && \
+	PORT=$(BACKEND_PORT) \
+	ONTOLOGY_PATH=../../$(ONTOLOGY_PATH) \
+	cargo run --bin server
 
 frontend: ## Run the frontend app (default: object-explorer)
 	@if [ ! -d "ui-framework/apps/$(APP_NAME)" ]; then \
@@ -88,7 +141,10 @@ frontend: ## Run the frontend app (default: object-explorer)
 	fi
 	@echo "$(BLUE)Starting frontend app '$(APP_NAME)' on port $(FRONTEND_PORT)...$(NC)"
 	@echo "$(YELLOW)Press Ctrl+C to stop$(NC)"
-	cd ui-framework/apps/$(APP_NAME) && npm run dev
+	cd ui-framework/apps/$(APP_NAME) && \
+	PORT=$(FRONTEND_PORT) \
+	VITE_GRAPHQL_URL=http://localhost:$(BACKEND_PORT) \
+	npm run dev
 
 dev: ## Run both backend and frontend together
 	@echo "$(BLUE)Starting backend and frontend...$(NC)"
@@ -96,10 +152,37 @@ dev: ## Run both backend and frontend together
 	@echo "$(GREEN)Frontend: http://localhost:$(FRONTEND_PORT)$(NC)"
 	@echo "$(YELLOW)Press Ctrl+C to stop both$(NC)"
 	@bash -c 'trap "kill 0" EXIT; \
-	cd rust-core && cargo run --bin server & \
+	cd rust-core/graphql-api && \
+	PORT=$(BACKEND_PORT) \
+	ONTOLOGY_PATH=../../$(ONTOLOGY_PATH) \
+	cargo run --bin server & \
 	BACKEND_PID=$$!; \
 	sleep 3; \
-	cd ../ui-framework/apps/$(APP_NAME) && npm run dev & \
+	cd ../../ui-framework/apps/$(APP_NAME) && \
+	PORT=$(FRONTEND_PORT) \
+	VITE_GRAPHQL_URL=http://localhost:$(BACKEND_PORT) \
+	npm run dev & \
+	FRONTEND_PID=$$!; \
+	wait $$BACKEND_PID $$FRONTEND_PID'
+
+start: services-up ## Start everything (Docker services + backend + frontend)
+	@echo "$(BLUE)Starting complete stack...$(NC)"
+	@echo "$(GREEN)Elasticsearch: http://localhost:$(ELASTICSEARCH_PORT)$(NC)"
+	@echo "$(GREEN)Dgraph HTTP: http://localhost:$(DGRAPH_HTTP_PORT)$(NC)"
+	@echo "$(GREEN)Backend GraphQL: http://localhost:$(BACKEND_PORT)/graphql$(NC)"
+	@echo "$(GREEN)Frontend: http://localhost:$(FRONTEND_PORT)$(NC)"
+	@echo "$(YELLOW)Press Ctrl+C to stop everything$(NC)"
+	@bash -c 'trap "make stop" EXIT INT TERM; \
+	cd rust-core/graphql-api && \
+	PORT=$(BACKEND_PORT) \
+	ONTOLOGY_PATH=../../$(ONTOLOGY_PATH) \
+	cargo run --bin server & \
+	BACKEND_PID=$$!; \
+	sleep 5; \
+	cd ../../ui-framework/apps/$(APP_NAME) && \
+	PORT=$(FRONTEND_PORT) \
+	VITE_GRAPHQL_URL=http://localhost:$(BACKEND_PORT) \
+	npm run dev & \
 	FRONTEND_PID=$$!; \
 	wait $$BACKEND_PID $$FRONTEND_PID'
 
@@ -122,13 +205,35 @@ clean: ## Clean build artifacts
 	cd ui-framework && rm -rf node_modules apps/*/node_modules apps/*/dist
 	@echo "$(GREEN)✓ Clean complete$(NC)"
 
-stop: ## Stop all running servers
-	@echo "$(BLUE)Stopping servers...$(NC)"
+stop: ## Stop all running servers and Docker services
+	@echo "$(BLUE)Stopping all services...$(NC)"
 	@pkill -f "cargo run --bin server" || true
 	@pkill -f "vite" || true
 	@lsof -ti:$(BACKEND_PORT) | xargs kill -9 2>/dev/null || true
 	@lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null || true
-	@echo "$(GREEN)✓ Servers stopped$(NC)"
+	@make services-down || true
+	@echo "$(GREEN)✓ All services stopped$(NC)"
+
+kill: ## Forcefully kill all processes (servers, Docker, ports)
+	@echo "$(BLUE)Forcefully killing all services...$(NC)"
+	@echo "$(YELLOW)Killing Rust/Cargo processes...$(NC)"
+	@pkill -9 -f "cargo run --bin server" 2>/dev/null || true
+	@pkill -9 -f "target.*server" 2>/dev/null || true
+	@echo "$(YELLOW)Killing Vite/Node frontend processes...$(NC)"
+	@pkill -9 -f "vite" 2>/dev/null || true
+	@pkill -9 -f "node.*vite" 2>/dev/null || true
+	@echo "$(YELLOW)Killing processes on configured ports...$(NC)"
+	@lsof -ti:$(BACKEND_PORT) 2>/dev/null | xargs kill -9 2>/dev/null || true
+	@lsof -ti:$(FRONTEND_PORT) 2>/dev/null | xargs kill -9 2>/dev/null || true
+	@lsof -ti:$(ELASTICSEARCH_PORT) 2>/dev/null | xargs kill -9 2>/dev/null || true
+	@lsof -ti:$(DGRAPH_HTTP_PORT) 2>/dev/null | xargs kill -9 2>/dev/null || true
+	@lsof -ti:$(DGRAPH_GRPC_PORT) 2>/dev/null | xargs kill -9 2>/dev/null || true
+	@echo "$(YELLOW)Forcefully stopping Docker containers...$(NC)"
+	@docker-compose kill 2>/dev/null || true
+	@docker-compose down -v --remove-orphans 2>/dev/null || true
+	@echo "$(YELLOW)Cleaning up any remaining Docker containers...$(NC)"
+	@docker ps -a --filter "name=ontology-" -q 2>/dev/null | xargs docker rm -f 2>/dev/null || true
+	@echo "$(GREEN)✓ All processes forcefully killed$(NC)"
 
 test: ## Run tests
 	@echo "$(BLUE)Running Rust tests...$(NC)"
@@ -154,3 +259,5 @@ financial-portfolio: dev ## Run financial-portfolio app with backend
 
 census-example: APP_NAME=census-example FRONTEND_PORT=3005
 census-example: dev ## Run census-example app with backend
+
+.PHONY: help install install-backend install-frontend services-up services-down services-logs services-status backend frontend dev start build build-backend build-frontend clean stop kill test object-explorer object-views vertex map-app financial-portfolio census-example
