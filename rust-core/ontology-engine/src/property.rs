@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde::ser::SerializeMap;
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -10,7 +11,7 @@ pub struct StructDef {
 }
 
 /// Property Type enumeration with support for complex types
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum PropertyType {
     // Simple types (kept for backward compatibility with string deserialization)
@@ -62,6 +63,49 @@ pub enum PropertyType {
         #[serde(rename = "types")]
         types: Vec<PropertyType>,
     },
+}
+
+impl Serialize for PropertyType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            PropertyType::String => serializer.serialize_str("string"),
+            PropertyType::Integer => serializer.serialize_str("integer"),
+            PropertyType::Int => serializer.serialize_str("int"),
+            PropertyType::Double => serializer.serialize_str("double"),
+            PropertyType::Float => serializer.serialize_str("float"),
+            PropertyType::Boolean => serializer.serialize_str("boolean"),
+            PropertyType::Bool => serializer.serialize_str("bool"),
+            PropertyType::Date => serializer.serialize_str("date"),
+            PropertyType::DateTime => serializer.serialize_str("datetime"),
+            PropertyType::Timestamp => serializer.serialize_str("timestamp"),
+            PropertyType::ObjectReference => serializer.serialize_str("object_reference"),
+            PropertyType::ObjectReferenceAlt => serializer.serialize_str("objectreference"),
+            PropertyType::GeoJSON => serializer.serialize_str("geojson"),
+            PropertyType::GeoJSONAlt => serializer.serialize_str("geo_json"),
+            PropertyType::Array { element_type } => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("elementType", element_type)?;
+                map.end()
+            },
+            PropertyType::Map { key_type, value_type } => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("keyType", key_type)?;
+                map.serialize_entry("valueType", value_type)?;
+                map.end()
+            },
+            PropertyType::Object(struct_def) => {
+                 struct_def.serialize(serializer)
+            },
+            PropertyType::Union { types } => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("types", types)?;
+                map.end()
+            },
+        }
+    }
 }
 
 impl PropertyType {
@@ -682,6 +726,25 @@ impl PropertyMap {
 mod tests {
     use super::*;
     
+    #[test]
+    fn test_property_type_serialization() {
+        assert_eq!(serde_json::to_string(&PropertyType::String).unwrap(), "\"string\"");
+        assert_eq!(serde_json::to_string(&PropertyType::Integer).unwrap(), "\"integer\"");
+
+        let array_type = PropertyType::Array { element_type: Box::new(PropertyType::String) };
+        let json = serde_json::to_string(&array_type).unwrap();
+        // The order of keys in the map is not guaranteed, but it should contain "elementType"
+        assert!(json.contains("\"elementType\":\"string\""));
+
+        let map_type = PropertyType::Map {
+            key_type: Box::new(PropertyType::String),
+            value_type: Box::new(PropertyType::Integer)
+        };
+        let json = serde_json::to_string(&map_type).unwrap();
+        assert!(json.contains("\"keyType\":\"string\""));
+        assert!(json.contains("\"valueType\":\"integer\""));
+    }
+
     #[test]
     fn test_property_type_from_str() {
         assert_eq!(PropertyType::from_str("string").unwrap(), PropertyType::String);

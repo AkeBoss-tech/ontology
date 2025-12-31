@@ -1,0 +1,60 @@
+actionTypes:
+  - id: "schedule_maintenance"
+    displayName: "Schedule Maintenance"
+    parameters:
+      - id: "target_aircraft"
+        type: "object_reference"
+        required: true
+      - id: "date"
+        type: "date"
+        required: true
+      - id: "description"
+        type: "string"
+    logic:
+      - operation: "create_object"
+        type: "maintenance_event"
+        properties:
+          date: "{{date}}"
+          status: "Scheduled"
+          description: "{{description}}"
+      - operation: "create_link"
+        linkType: "aircraft_has_history"
+        from: "{{target_aircraft}}"
+        to: "new_maintenance_event"
+
+functionTypes:
+  - id: "calculate_total_maintenance_cost"
+    displayName: "Calculate Total Maintenance Cost"
+    description: "Sums the cost of all maintenance events for an aircraft"
+    parameters:
+      - id: "aircraft_id"
+        type: "object_reference"
+        required: true
+    returnType:
+      type: "property"
+      propertyType: "double"
+    logic:
+      type: "aggregation"
+      linkType: "aircraft_has_history"
+      aggregation: "sum"
+      property: "cost"
+    cacheable: true
+
+  - id: "get_maintenance_events"
+    displayName: "Get Maintenance Events"
+    description: "Get all maintenance events linked to an aircraft"
+    parameters:
+      - id: "aircraft_id"
+        type: "object_reference"
+        required: true
+    returnType:
+      type: "array"
+      elementType:
+        type: "object_type"
+        objectType: "maintenance_event"
+    logic:
+      type: "link_traversal"
+      linkType: "aircraft_has_history"
+      targetType: "maintenance_event"
+      filter: null
+    cacheable: false

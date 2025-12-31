@@ -1,0 +1,129 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sys: <http://your-platform.com/ontology/system#> .
+@prefix : <http://your-platform.com/ontology/domain/aircraft#> .
+
+# Interfaces
+:Location a owl:Class ;
+    rdfs:label "Location" .
+
+:latitude a owl:DatatypeProperty ;
+    rdfs:domain :Location ;
+    rdfs:range xsd:double ;
+    rdfs:label "Latitude coordinate" ;
+    sys:unit "degrees" .
+
+:longitude a owl:DatatypeProperty ;
+    rdfs:domain :Location ;
+    rdfs:range xsd:double ;
+    rdfs:label "Longitude coordinate" ;
+    sys:unit "degrees" .
+
+# Object Types
+
+:Aircraft a owl:Class ;
+    rdfs:label "Aircraft" ;
+    sys:primaryKey :tail_number ;
+    sys:titleKey :tail_number ;
+    sys:backingDatasource "s3://clean-data/aircraft_fleet" .
+
+:tail_number a owl:DatatypeProperty ;
+    rdfs:domain :Aircraft ;
+    rdfs:range xsd:string ;
+    rdfs:label "Unique tail number identifier" .
+
+:model a owl:DatatypeProperty ;
+    rdfs:domain :Aircraft ;
+    rdfs:range xsd:string ;
+    rdfs:label "Aircraft model" .
+
+:flight_hours a owl:DatatypeProperty ;
+    rdfs:domain :Aircraft ;
+    rdfs:range xsd:double ;
+    rdfs:label "Total flight hours" ;
+    sys:unit "hours" .
+    # Note: formatting meta-data simplified for RDF, can be added as JSON-string annotation if needed
+
+:last_maintenance a owl:DatatypeProperty ;
+    rdfs:domain :Aircraft ;
+    rdfs:range xsd:date ;
+    rdfs:label "Date of last maintenance" .
+
+:tags a owl:DatatypeProperty ;
+    rdfs:domain :Aircraft ;
+    rdfs:range rdf:List ; # Simplified for array
+    rdfs:label "Tags associated with the aircraft" .
+
+:metadata a owl:DatatypeProperty ;
+    rdfs:domain :Aircraft ;
+    rdfs:range rdfs:Resource ; # Simplified for map
+    rdfs:label "Additional metadata" .
+
+
+:MaintenanceEvent a owl:Class ;
+    rdfs:label "Maintenance Event" ;
+    sys:primaryKey :event_id ;
+    sys:titleKey :event_id .
+
+:event_id a owl:DatatypeProperty ;
+    rdfs:domain :MaintenanceEvent ;
+    rdfs:range xsd:string .
+
+:description a owl:DatatypeProperty ;
+    rdfs:domain :MaintenanceEvent ;
+    rdfs:range xsd:string .
+
+:date a owl:DatatypeProperty ;
+    rdfs:domain :MaintenanceEvent ;
+    rdfs:range xsd:date .
+
+:status a owl:DatatypeProperty ;
+    rdfs:domain :MaintenanceEvent ;
+    rdfs:range xsd:string .
+
+:cost a owl:DatatypeProperty ;
+    rdfs:domain :MaintenanceEvent ;
+    rdfs:range xsd:double ;
+    sys:unit "USD" .
+
+:address a owl:DatatypeProperty ;
+    rdfs:domain :MaintenanceEvent ;
+    rdfs:range :Address ; # Structured object type
+    rdfs:label "Maintenance facility address" .
+
+:Address a owl:Class .
+:street a owl:DatatypeProperty ; rdfs:domain :Address ; rdfs:range xsd:string .
+:city a owl:DatatypeProperty ; rdfs:domain :Address ; rdfs:range xsd:string .
+:state a owl:DatatypeProperty ; rdfs:domain :Address ; rdfs:range xsd:string .
+
+
+:Office a owl:Class ;
+    rdfs:label "Office" ;
+    sys:primaryKey :office_id ;
+    sys:titleKey :office_name ;
+    sys:implements :Location .
+
+:office_id a owl:DatatypeProperty ;
+    rdfs:domain :Office ;
+    rdfs:range xsd:string .
+
+:office_name a owl:DatatypeProperty ;
+    rdfs:domain :Office ;
+    rdfs:range xsd:string .
+
+# Note: :latitude and :longitude are inherited via :Location
+
+# Link Types
+
+:aircraft_has_history a owl:ObjectProperty ;
+    rdfs:label "Aircraft Has History" ;
+    rdfs:domain :Aircraft ;
+    rdfs:range :MaintenanceEvent ;
+    sys:bidirectional true .
+
+:MilitaryAircraft a owl:Class ;
+    rdfs:label "Military Aircraft" ;
+    rdfs:subClassOf :Aircraft ;
+    sys:primaryKey :tail_number .
