@@ -45,3 +45,4 @@ export function getPropertiesAsObject(properties: any): Record<string, any> {
   return parseProperties(properties);
 }
 
+

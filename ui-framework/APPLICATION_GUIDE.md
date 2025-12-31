@@ -823,3 +823,4 @@ If your API is on a different domain, configure your server to proxy `/graphql` 
 - Build custom pages for your domain
 - Extend with domain-specific visualizations and workflows
 
+
