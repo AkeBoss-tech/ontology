@@ -21,6 +21,13 @@ fn test_geojson_validation() {
         required: false,
         default: None,
         validation: None,
+        description: None,
+        annotations: std::collections::HashMap::new(),
+        unit: None,
+        format: None,
+        sensitivity_tags: vec![],
+        pii: false,
+        deprecated: None,
     };
 
     // Valid GeoJSON

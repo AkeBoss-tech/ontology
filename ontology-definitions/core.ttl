@@ -1,0 +1,25 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sys: <http://your-platform.com/ontology/system#> .
+
+# System Annotations
+sys:primaryKey a owl:AnnotationProperty ;
+    rdfs:label "Primary Key" ;
+    rdfs:comment "The property that uniquely identifies an instance of this object type." .
+
+sys:titleKey a owl:AnnotationProperty ;
+    rdfs:label "Title Key" ;
+    rdfs:comment "The property to use as the display title for the object." .
+
+sys:backingDatasource a owl:AnnotationProperty ;
+    rdfs:label "Backing Datasource" ;
+    rdfs:comment "URI or path to the source data." .
+
+sys:implements a owl:AnnotationProperty ;
+    rdfs:label "Implements Interface" ;
+    rdfs:comment "Indicates that an object type implements an interface." .
+
+sys:requiredLinkType a owl:AnnotationProperty ;
+    rdfs:label "Required Link Type" .

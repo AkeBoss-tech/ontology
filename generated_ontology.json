@@ -1,0 +1,308 @@
+{
+  "ontology": {
+    "objectTypes": [
+      {
+        "id": "MaintenanceEvent",
+        "displayName": "Maintenance Event",
+        "primaryKey": "event_id",
+        "properties": [
+          {
+            "id": "event_id",
+            "displayName": null,
+            "type": "string",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": null,
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "description",
+            "displayName": null,
+            "type": "string",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": null,
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "cost",
+            "displayName": null,
+            "type": "double",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": null,
+            "annotations": {},
+            "unit": "USD",
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "status",
+            "displayName": null,
+            "type": "string",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": null,
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "address",
+            "displayName": "Maintenance facility address",
+            "type": {
+              "keyType": "string",
+              "valueType": "string"
+            },
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Maintenance facility address",
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "date",
+            "displayName": null,
+            "type": "date",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": null,
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          }
+        ],
+        "backingDatasource": null,
+        "titleKey": "event_id",
+        "implements": []
+      },
+      {
+        "id": "Office",
+        "displayName": "Office",
+        "primaryKey": "office_id",
+        "properties": [
+          {
+            "id": "office_id",
+            "displayName": null,
+            "type": "string",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": null,
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "office_name",
+            "displayName": null,
+            "type": "string",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": null,
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          }
+        ],
+        "backingDatasource": null,
+        "titleKey": "office_name",
+        "implements": [
+          "Location"
+        ]
+      },
+      {
+        "id": "Aircraft",
+        "displayName": "Aircraft",
+        "primaryKey": "tail_number",
+        "properties": [
+          {
+            "id": "flight_hours",
+            "displayName": "Total flight hours",
+            "type": "double",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Total flight hours",
+            "annotations": {},
+            "unit": "hours",
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "tail_number",
+            "displayName": "Unique tail number identifier",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Unique tail number identifier",
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "model",
+            "displayName": "Aircraft model",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Aircraft model",
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "metadata",
+            "displayName": "Additional metadata",
+            "type": {
+              "keyType": "string",
+              "valueType": "string"
+            },
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Additional metadata",
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "last_maintenance",
+            "displayName": "Date of last maintenance",
+            "type": "date",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Date of last maintenance",
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "tags",
+            "displayName": "Tags associated with the aircraft",
+            "type": {
+              "elementType": "string"
+            },
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Tags associated with the aircraft",
+            "annotations": {},
+            "unit": null,
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          }
+        ],
+        "backingDatasource": "s3://clean-data/aircraft_fleet",
+        "titleKey": "tail_number",
+        "implements": []
+      }
+    ],
+    "linkTypes": [
+      {
+        "id": "aircraft_has_history",
+        "displayName": "Aircraft Has History",
+        "source": "Aircraft",
+        "target": "MaintenanceEvent",
+        "cardinality": "ONE_TO_MANY",
+        "properties": [],
+        "bidirectional": true
+      }
+    ],
+    "actionTypes": [],
+    "interfaces": [
+      {
+        "id": "Location",
+        "displayName": "Location",
+        "properties": [
+          {
+            "id": "longitude",
+            "displayName": "Longitude coordinate",
+            "type": "double",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Longitude coordinate",
+            "annotations": {},
+            "unit": "degrees",
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          },
+          {
+            "id": "latitude",
+            "displayName": "Latitude coordinate",
+            "type": "double",
+            "required": false,
+            "default": null,
+            "validation": null,
+            "description": "Latitude coordinate",
+            "annotations": {},
+            "unit": "degrees",
+            "format": null,
+            "sensitivityTags": [],
+            "pii": false,
+            "deprecated": null
+          }
+        ],
+        "requiredLinkTypes": []
+      }
+    ],
+    "functionTypes": []
+  }
+}
