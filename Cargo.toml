@@ -6,6 +6,7 @@ members = [
     "rust-core/security",
     "rust-core/versioning",
     "rust-core/writeback",
+    "rust-core/ontology-compiler",
 ]
 resolver = "2"
 
@@ -25,8 +26,3 @@ thiserror = "1.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
-
-
-
-
-
