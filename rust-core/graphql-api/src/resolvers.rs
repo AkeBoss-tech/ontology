@@ -1,5 +1,6 @@
 use async_graphql::{Context, Object, FieldResult, InputObject, SimpleObject, Json};
-use indexing::store::{SearchStore, GraphStore, SearchQuery, Filter};
+use indexing::store::{SearchStore, GraphStore, SearchQuery, Filter, CentralityMetric, CommunityAlgorithm};
+use indexing::{DataQualityMetrics, DataLineage, ObjectUsageMetrics};
 use indexing::hydration::ObjectHydrator;
 use ontology_engine::{Ontology, FunctionExecutor, InterfaceValidator, PropertyValue};
 use versioning::time_query;
@@ -8,6 +9,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use chrono::{DateTime, Utc};
 
 /// Root query type for GraphQL API
 #[derive(Default)]
@@ -383,12 +385,12 @@ impl QueryRoot {
         let mut results = Vec::new();
         for historical in historical_objects {
             // Create a temporary IndexedObject from HistoricalObject
-            let indexed = indexing::store::IndexedObject {
-                object_type: historical.object_type.clone(),
-                object_id: historical.object_id.clone(),
-                properties: historical.properties.clone(),
-                indexed_at: historical.reconstructed_at,
-            };
+            let mut indexed = indexing::store::IndexedObject::new(
+                historical.object_type.clone(),
+                historical.object_id.clone(),
+                historical.properties.clone(),
+            );
+            indexed.indexed_at = historical.reconstructed_at;
             
             if let Ok(hydrated) = hydrator.hydrate_from_indexed(&indexed, object_type_def) {
                 let properties_json: Value = serde_json::to_value(&hydrated.properties)
@@ -531,10 +533,29 @@ impl QueryRoot {
                 "avg" => indexing::store::Aggregation::Avg(agg_input.property.clone()),
                 "min" => indexing::store::Aggregation::Min(agg_input.property.clone()),
                 "max" => indexing::store::Aggregation::Max(agg_input.property.clone()),
-                _ => return Err(async_graphql::Error::new(format!(
-                    "Invalid aggregation operation: {}. Valid: count, sum, avg, min, max",
-                    agg_input.operation
-                ))),
+                "median" => indexing::store::Aggregation::Median(agg_input.property.clone()),
+                "stddev" | "std_dev" => indexing::store::Aggregation::StdDev(agg_input.property.clone()),
+                "variance" => indexing::store::Aggregation::Variance(agg_input.property.clone()),
+                "distinct_count" => indexing::store::Aggregation::DistinctCount(agg_input.property.clone()),
+                _ => {
+                    // Check for percentile format: "p50", "p95", etc.
+                    if agg_input.operation.starts_with('p') && agg_input.operation.len() > 1 {
+                        if let Ok(pct_val) = agg_input.operation[1..].parse::<u8>() {
+                            let pct = pct_val as f64 / 100.0;
+                            indexing::store::Aggregation::Percentile(agg_input.property.clone(), pct)
+                        } else {
+                            return Err(async_graphql::Error::new(format!(
+                                "Invalid aggregation operation: {}. Valid: count, sum, avg, min, max, median, stddev, variance, distinct_count, p50, p95, etc.",
+                                agg_input.operation
+                            )));
+                        }
+                    } else {
+                        return Err(async_graphql::Error::new(format!(
+                            "Invalid aggregation operation: {}. Valid: count, sum, avg, min, max, median, stddev, variance, distinct_count, p50, p95, etc.",
+                            agg_input.operation
+                        )));
+                    }
+                }
             };
             store_aggregations.push(agg);
         }
@@ -896,6 +917,116 @@ impl QueryRoot {
         self.query_interface(ctx, interface_id, filters, limit, offset).await
     }
     
+    /// Get data quality metrics for an object type or property
+    async fn data_quality_metrics(
+        &self,
+        ctx: &Context<'_>,
+        object_type: String,
+        property_id: Option<String>,
+    ) -> FieldResult<DataQualityMetricsResult> {
+        // For now, return placeholder - actual implementation would compute from data
+        Ok(DataQualityMetricsResult {
+            object_type,
+            property_id,
+            null_count: 0,
+            null_percentage: 0.0,
+            invalid_count: 0,
+            duplicate_count: 0,
+            uniqueness_ratio: 1.0,
+            quality_score: 1.0,
+        })
+    }
+    
+    /// Get data lineage for an object
+    async fn data_lineage(
+        &self,
+        ctx: &Context<'_>,
+        object_type: String,
+        object_id: String,
+    ) -> FieldResult<DataLineageResult> {
+        // For now, return placeholder - actual implementation would fetch from lineage store
+        Ok(DataLineageResult {
+            object_type,
+            object_id,
+            source_system: "unknown".to_string(),
+            source_table: None,
+            source_file: None,
+            ingested_at: Utc::now().to_rfc3339(),
+            ingested_by: "system".to_string(),
+            transformations: Vec::new(),
+        })
+    }
+    
+    /// Get usage metrics for objects
+    async fn usage_metrics(
+        &self,
+        ctx: &Context<'_>,
+        object_type: String,
+        object_id: Option<String>,
+    ) -> FieldResult<UsageMetricsResult> {
+        // For now, return placeholder - actual implementation would fetch from usage tracker
+        Ok(UsageMetricsResult {
+            object_type,
+            object_id,
+            query_count: 0,
+            last_queried: None,
+            query_frequency: 0.0,
+            edit_count: 0,
+            traversed_count: 0,
+        })
+    }
+    
+    /// Get distribution statistics for a property
+    async fn distribution(
+        &self,
+        ctx: &Context<'_>,
+        object_type: String,
+        property: String,
+        bins: Option<i32>,
+    ) -> FieldResult<DistributionResult> {
+        // This would call the Python analytics service
+        // For now, return placeholder
+        Ok(DistributionResult {
+            histogram: Json(Value::Object(serde_json::Map::new())),
+            percentiles: Json(Value::Object(serde_json::Map::new())),
+            skewness: None,
+            kurtosis: None,
+        })
+    }
+    
+    /// Get correlation matrix between properties
+    async fn correlations(
+        &self,
+        ctx: &Context<'_>,
+        object_type: String,
+        properties: Vec<String>,
+    ) -> FieldResult<CorrelationMatrixResult> {
+        // This would call the Python analytics service
+        // For now, return placeholder
+        Ok(CorrelationMatrixResult {
+            correlations: Json(Value::Object(serde_json::Map::new())),
+        })
+    }
+    
+    /// Perform time series analysis
+    async fn time_series(
+        &self,
+        ctx: &Context<'_>,
+        object_type: String,
+        value_property: String,
+        time_property: String,
+        frequency: Option<String>,
+    ) -> FieldResult<TimeSeriesResult> {
+        // This would call the Python analytics service
+        // For now, return placeholder
+        Ok(TimeSeriesResult {
+            trend: Json(Value::Object(serde_json::Map::new())),
+            seasonality: Json(Value::Object(serde_json::Map::new())),
+            volatility: 0.0,
+            growth_rate: 0.0,
+        })
+    }
+    
     /// Get all object types
     async fn get_object_types(
         &self,
@@ -1080,5 +1211,99 @@ pub struct ImplementerInfo {
     #[graphql(name = "objectType")]
     pub object_type: String,
     pub count: usize,
+}
+
+/// Data quality metrics result
+#[derive(SimpleObject)]
+pub struct DataQualityMetricsResult {
+    #[graphql(name = "objectType")]
+    pub object_type: String,
+    #[graphql(name = "propertyId")]
+    pub property_id: Option<String>,
+    #[graphql(name = "nullCount")]
+    pub null_count: usize,
+    #[graphql(name = "nullPercentage")]
+    pub null_percentage: f64,
+    #[graphql(name = "invalidCount")]
+    pub invalid_count: usize,
+    #[graphql(name = "duplicateCount")]
+    pub duplicate_count: usize,
+    #[graphql(name = "uniquenessRatio")]
+    pub uniqueness_ratio: f64,
+    #[graphql(name = "qualityScore")]
+    pub quality_score: f64,
+}
+
+/// Data lineage result
+#[derive(SimpleObject)]
+pub struct DataLineageResult {
+    #[graphql(name = "objectType")]
+    pub object_type: String,
+    #[graphql(name = "objectId")]
+    pub object_id: String,
+    #[graphql(name = "sourceSystem")]
+    pub source_system: String,
+    #[graphql(name = "sourceTable")]
+    pub source_table: Option<String>,
+    #[graphql(name = "sourceFile")]
+    pub source_file: Option<String>,
+    #[graphql(name = "ingestedAt")]
+    pub ingested_at: String, // ISO 8601 string format
+    #[graphql(name = "ingestedBy")]
+    pub ingested_by: String,
+    pub transformations: Vec<TransformationResult>,
+}
+
+/// Transformation result
+#[derive(SimpleObject)]
+pub struct TransformationResult {
+    pub name: String,
+    pub description: String,
+    #[graphql(name = "appliedAt")]
+    pub applied_at: String, // ISO 8601 string format
+}
+
+/// Usage metrics result
+#[derive(SimpleObject)]
+pub struct UsageMetricsResult {
+    #[graphql(name = "objectType")]
+    pub object_type: String,
+    #[graphql(name = "objectId")]
+    pub object_id: Option<String>,
+    #[graphql(name = "queryCount")]
+    pub query_count: usize,
+    #[graphql(name = "lastQueried")]
+    pub last_queried: Option<String>, // ISO 8601 string format
+    #[graphql(name = "queryFrequency")]
+    pub query_frequency: f64,
+    #[graphql(name = "editCount")]
+    pub edit_count: usize,
+    #[graphql(name = "traversedCount")]
+    pub traversed_count: usize,
+}
+
+/// Distribution result
+#[derive(SimpleObject)]
+pub struct DistributionResult {
+    pub histogram: Json<Value>,
+    pub percentiles: Json<Value>,
+    pub skewness: Option<f64>,
+    pub kurtosis: Option<f64>,
+}
+
+/// Correlation matrix result
+#[derive(SimpleObject)]
+pub struct CorrelationMatrixResult {
+    pub correlations: Json<Value>,
+}
+
+/// Time series analysis result
+#[derive(SimpleObject)]
+pub struct TimeSeriesResult {
+    pub trend: Json<Value>,
+    pub seasonality: Json<Value>,
+    pub volatility: f64,
+    #[graphql(name = "growthRate")]
+    pub growth_rate: f64,
 }
 

@@ -136,6 +136,7 @@ impl Compiler {
         implements.dedup();
 
         Ok(ObjectType {
+            schema_evolution: None,
             id,
             display_name,
             primary_key,
@@ -264,6 +265,7 @@ impl Compiler {
                          sensitivity_tags: vec![],
                          pii: false,
                          deprecated: None,
+                         statistics: None,
                      });
                  }
              }

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use chrono::{DateTime, Utc};
 use crate::property::{Property, PropertyType};
 use crate::link::LinkCardinality;
 
@@ -88,6 +89,29 @@ pub struct ObjectType {
     #[serde(rename = "implements")]
     #[serde(default)]
     pub implements: Vec<String>, // List of interface IDs this object type implements
+    
+    // Schema evolution metadata
+    #[serde(default)]
+    pub schema_evolution: Option<SchemaEvolution>,
+}
+
+/// Schema evolution tracking
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaEvolution {
+    pub version: String,
+    pub created_at: DateTime<Utc>,
+    pub changes: Vec<SchemaChange>,
+    pub deprecated_properties: Vec<String>,
+    pub migration_script: Option<String>,
+}
+
+/// Schema change types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SchemaChange {
+    PropertyAdded { property_id: String },
+    PropertyRemoved { property_id: String },
+    PropertyTypeChanged { property_id: String, old_type: String, new_type: String },
+    PropertyRenamed { old_id: String, new_id: String },
 }
 
 impl ObjectType {
@@ -523,6 +547,7 @@ mod tests {
                     sensitivity_tags: vec![],
                     pii: false,
                     deprecated: None,
+                    statistics: None,
                 },
                 Property {
                     id: "name".to_string(),
@@ -538,11 +563,13 @@ mod tests {
                     sensitivity_tags: vec![],
                     pii: false,
                     deprecated: None,
+                    statistics: None,
                 },
             ],
             backing_datasource: None,
             title_key: Some("name".to_string()),
             implements: vec![],
+            schema_evolution: None,
         }
     }
     

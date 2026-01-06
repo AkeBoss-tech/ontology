@@ -2,12 +2,43 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde::ser::SerializeMap;
 use std::collections::HashMap;
 use std::str::FromStr;
+use chrono::{DateTime, Utc};
 
 /// Struct definition for nested object types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructDef {
     pub id: String,
     pub fields: Vec<Property>,
+}
+
+/// Statistical metadata for a property (computed during indexing)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PropertyStatistics {
+    pub cardinality: usize, // Number of distinct values
+    pub null_count: usize,
+    pub min: Option<PropertyValue>,
+    pub max: Option<PropertyValue>,
+    pub mean: Option<f64>,
+    pub median: Option<PropertyValue>,
+    pub mode: Option<PropertyValue>, // Most common value
+    pub top_values: Vec<(PropertyValue, usize)>, // Top 10 values with counts
+    pub last_computed: DateTime<Utc>,
+}
+
+impl PropertyStatistics {
+    pub fn new() -> Self {
+        Self {
+            cardinality: 0,
+            null_count: 0,
+            min: None,
+            max: None,
+            mean: None,
+            median: None,
+            mode: None,
+            top_values: Vec::new(),
+            last_computed: Utc::now(),
+        }
+    }
 }
 
 /// Property Type enumeration with support for complex types
@@ -192,6 +223,10 @@ pub struct Property {
     
     #[serde(default)]
     pub deprecated: Option<DeprecationInfo>,
+    
+    // Statistical metadata (computed during indexing)
+    #[serde(default)]
+    pub statistics: Option<PropertyStatistics>,
 }
 
 fn deserialize_property_type<'de, D>(deserializer: D) -> Result<PropertyType, D::Error>
@@ -328,6 +363,7 @@ impl Property {
                         sensitivity_tags: Vec::new(),
                         pii: false,
                         deprecated: None,
+                        statistics: None,
                     };
                     element_prop.validate_value_with_reference_check(item, reference_checker)
                         .map_err(|e| format!("Array element {}: {}", idx, e))?;
@@ -351,6 +387,7 @@ impl Property {
                         sensitivity_tags: Vec::new(),
                         pii: false,
                         deprecated: None,
+                        statistics: None,
                     };
                     // Convert key to PropertyValue based on key type
                     let key_value = match key_type.as_ref() {
@@ -380,6 +417,7 @@ impl Property {
                         sensitivity_tags: Vec::new(),
                         pii: false,
                         deprecated: None,
+                        statistics: None,
                     };
                     val_prop.validate_value_with_reference_check(val, reference_checker)
                         .map_err(|e| format!("Map value for key '{}': {}", key, e))?;
@@ -429,6 +467,7 @@ impl Property {
                         sensitivity_tags: Vec::new(),
                         pii: false,
                         deprecated: None,
+                        statistics: None,
                     };
                     match union_prop.validate_value_with_reference_check(value, reference_checker) {
                         Ok(()) => {

@@ -124,6 +124,34 @@ pub trait GraphStore: Send + Sync {
         max_hops: usize,
         aggregation: &TraversalAggregation,
     ) -> Result<TraversalAggregationResult, StoreError>;
+    
+    /// Compute centrality metrics for objects in the graph
+    async fn compute_centrality(
+        &self,
+        object_type: &str,
+        metric: CentralityMetric,
+    ) -> Result<HashMap<String, f64>, StoreError>;
+    
+    /// Find communities/clusters in the graph
+    async fn detect_communities(
+        &self,
+        object_type: &str,
+        algorithm: CommunityAlgorithm,
+    ) -> Result<HashMap<String, usize>, StoreError>;
+    
+    /// Find shortest path between objects
+    async fn shortest_path(
+        &self,
+        source_id: &str,
+        target_id: &str,
+        link_types: &[String],
+    ) -> Result<Vec<String>, StoreError>;
+    
+    /// Compute graph metrics (density, clustering coefficient, etc.)
+    async fn graph_metrics(
+        &self,
+        object_type: &str,
+    ) -> Result<GraphMetrics, StoreError>;
 }
 
 /// Abstract trait for columnar store backends (Parquet, S3, etc.)
@@ -199,6 +227,14 @@ pub struct SortOption {
     pub ascending: bool,
 }
 
+/// Refresh status for data freshness tracking
+#[derive(Debug, Clone)]
+pub enum RefreshStatus {
+    UpToDate,
+    Stale { days_behind: i64 },
+    Failed { last_attempt: chrono::DateTime<chrono::Utc>, error: String },
+}
+
 /// Indexed object representation
 #[derive(Debug, Clone)]
 pub struct IndexedObject {
@@ -206,6 +242,12 @@ pub struct IndexedObject {
     pub object_id: String,
     pub properties: PropertyMap,
     pub indexed_at: chrono::DateTime<chrono::Utc>,
+    
+    // Data freshness metadata
+    pub source_last_modified: Option<chrono::DateTime<chrono::Utc>>,
+    pub refresh_frequency: Option<String>, // "daily", "hourly", "real-time"
+    pub next_refresh: Option<chrono::DateTime<chrono::Utc>>,
+    pub refresh_status: RefreshStatus,
 }
 
 impl IndexedObject {
@@ -215,6 +257,30 @@ impl IndexedObject {
             object_id,
             properties,
             indexed_at: chrono::Utc::now(),
+            source_last_modified: None,
+            refresh_frequency: None,
+            next_refresh: None,
+            refresh_status: RefreshStatus::UpToDate,
+        }
+    }
+    
+    /// Check if the object is stale
+    pub fn is_stale(&self) -> bool {
+        match &self.refresh_status {
+            RefreshStatus::Stale { .. } => true,
+            RefreshStatus::Failed { .. } => true,
+            RefreshStatus::UpToDate => false,
+        }
+    }
+    
+    /// Get days behind if stale
+    pub fn days_behind(&self) -> Option<i64> {
+        match &self.refresh_status {
+            RefreshStatus::Stale { days_behind } => Some(*days_behind),
+            RefreshStatus::Failed { last_attempt, .. } => {
+                Some((chrono::Utc::now() - *last_attempt).num_days())
+            }
+            RefreshStatus::UpToDate => None,
         }
     }
 }
@@ -246,6 +312,13 @@ pub enum Aggregation {
     Avg(String),
     Min(String),
     Max(String),
+    Median(String),
+    StdDev(String),
+    Variance(String),
+    Percentile(String, f64), // property name, percentile (0.0-1.0)
+    DistinctCount(String),
+    TopN(String, usize), // property name, N
+    BottomN(String, usize),
 }
 
 /// Analytics query result
@@ -273,6 +346,31 @@ pub struct TraversalAggregationResult {
     pub value: ontology_engine::PropertyValue,
     /// Count of objects aggregated
     pub count: usize,
+}
+
+/// Centrality metrics for graph analysis
+#[derive(Debug, Clone)]
+pub enum CentralityMetric {
+    Degree,
+    Betweenness,
+    PageRank { damping: f64 },
+}
+
+/// Community detection algorithms
+#[derive(Debug, Clone)]
+pub enum CommunityAlgorithm {
+    Louvain,
+    LabelPropagation,
+}
+
+/// Graph-level metrics
+#[derive(Debug, Clone)]
+pub struct GraphMetrics {
+    pub node_count: usize,
+    pub edge_count: usize,
+    pub density: f64,
+    pub average_clustering_coefficient: f64,
+    pub average_degree: f64,
 }
 
 /// Store backend - wrapper that implements all three store traits
@@ -915,6 +1013,10 @@ impl SearchStore for ElasticsearchStore {
                 object_id: id.to_string(),
                 properties,
                 indexed_at,
+                source_last_modified: None,
+                refresh_frequency: None,
+                next_refresh: None,
+                refresh_status: RefreshStatus::UpToDate,
             });
         }
         
@@ -984,6 +1086,10 @@ impl SearchStore for ElasticsearchStore {
             object_id: object_id.to_string(),
             properties,
             indexed_at,
+            source_last_modified: None,
+            refresh_frequency: None,
+            next_refresh: None,
+            refresh_status: RefreshStatus::UpToDate,
         }))
     }
     
@@ -1674,12 +1780,20 @@ impl GraphStore for DgraphStore {
         };
         
         // Build aggregation expression based on operation
+        // Note: Dgraph supports limited aggregations, so some will need post-processing
         let agg_expr = match &aggregation.operation {
             Aggregation::Count => "count(uid)".to_string(),
             Aggregation::Sum(prop) => format!("sum({})", prop),
             Aggregation::Avg(prop) => format!("avg({})", prop),
             Aggregation::Min(prop) => format!("min({})", prop),
             Aggregation::Max(prop) => format!("max({})", prop),
+            Aggregation::Median(_) | Aggregation::StdDev(_) | Aggregation::Variance(_) |
+            Aggregation::Percentile(_, _) | Aggregation::DistinctCount(_) |
+            Aggregation::TopN(_, _) | Aggregation::BottomN(_, _) => {
+                return Err(StoreError::Query(
+                    format!("Aggregation {:?} not supported in graph traversal. Use columnar store instead.", aggregation.operation)
+                ));
+            }
         };
         
         // Build filter string if object filters are provided
@@ -1809,6 +1923,12 @@ impl GraphStore for DgraphStore {
                             (0, 0)
                         }
                     }
+                    Aggregation::Median(_) | Aggregation::StdDev(_) | Aggregation::Variance(_) |
+                    Aggregation::Percentile(_, _) | Aggregation::DistinctCount(_) |
+                    Aggregation::TopN(_, _) | Aggregation::BottomN(_, _) => {
+                        // These aggregations are not supported in graph traversal
+                        (0, 0)
+                    }
                 };
                 
                 (value, count)
@@ -1832,11 +1952,61 @@ impl GraphStore for DgraphStore {
                 // In a full implementation, we'd extract the actual double value from Dgraph response
                 ontology_engine::PropertyValue::Integer(value)
             }
+            Aggregation::Median(_) | Aggregation::StdDev(_) | Aggregation::Variance(_) |
+            Aggregation::Percentile(_, _) | Aggregation::DistinctCount(_) |
+            Aggregation::TopN(_, _) | Aggregation::BottomN(_, _) => {
+                // These aggregations are not supported in graph traversal
+                return Err(StoreError::Query(
+                    format!("Aggregation {:?} not supported in graph traversal", aggregation.operation)
+                ));
+            }
         };
         
         Ok(TraversalAggregationResult {
             value: prop_value,
             count,
+        })
+    }
+    
+    async fn compute_centrality(
+        &self,
+        _object_type: &str,
+        _metric: CentralityMetric,
+    ) -> Result<HashMap<String, f64>, StoreError> {
+        // Placeholder implementation - would require graph algorithms
+        Err(StoreError::Query("Centrality computation not yet implemented".to_string()))
+    }
+    
+    async fn detect_communities(
+        &self,
+        _object_type: &str,
+        _algorithm: CommunityAlgorithm,
+    ) -> Result<HashMap<String, usize>, StoreError> {
+        // Placeholder implementation - would require community detection algorithms
+        Err(StoreError::Query("Community detection not yet implemented".to_string()))
+    }
+    
+    async fn shortest_path(
+        &self,
+        _source_id: &str,
+        _target_id: &str,
+        _link_types: &[String],
+    ) -> Result<Vec<String>, StoreError> {
+        // Placeholder implementation - would require shortest path algorithm
+        Err(StoreError::Query("Shortest path computation not yet implemented".to_string()))
+    }
+    
+    async fn graph_metrics(
+        &self,
+        _object_type: &str,
+    ) -> Result<GraphMetrics, StoreError> {
+        // Placeholder implementation
+        Ok(GraphMetrics {
+            node_count: 0,
+            edge_count: 0,
+            density: 0.0,
+            average_clustering_coefficient: 0.0,
+            average_degree: 0.0,
         })
     }
 }
@@ -2127,6 +2297,35 @@ impl ColumnarStore for ParquetStore {
                 Aggregation::Max(prop) => {
                     agg_exprs.push(col(prop).max().alias(&format!("max_{}", prop)));
                 }
+                Aggregation::Median(prop) => {
+                    agg_exprs.push(col(prop).median().alias(&format!("median_{}", prop)));
+                }
+                Aggregation::StdDev(prop) => {
+                    agg_exprs.push(col(prop).std(1).alias(&format!("stddev_{}", prop)));
+                }
+                Aggregation::Variance(prop) => {
+                    agg_exprs.push(col(prop).var(1).alias(&format!("variance_{}", prop)));
+                }
+                Aggregation::Percentile(prop, pct) => {
+                    let pct_val = (*pct * 100.0) as u8;
+                    agg_exprs.push(col(prop).quantile(lit(*pct), QuantileInterpolOptions::Linear).alias(&format!("p{}_", pct_val)));
+                }
+                Aggregation::DistinctCount(prop) => {
+                    agg_exprs.push(col(prop).n_unique().alias(&format!("distinct_count_{}", prop)));
+                }
+                Aggregation::TopN(prop, _n) => {
+                    // TopN is handled separately as it requires sorting the entire dataset
+                    // This will be implemented as a post-processing step
+                    return Err(StoreError::Query(
+                        format!("TopN aggregation for property '{}' requires separate handling", prop)
+                    ));
+                }
+                Aggregation::BottomN(prop, _n) => {
+                    // BottomN is handled separately as it requires sorting the entire dataset
+                    return Err(StoreError::Query(
+                        format!("BottomN aggregation for property '{}' requires separate handling", prop)
+                    ));
+                }
             }
         }
 
@@ -2258,6 +2457,10 @@ mod tests {
             object_id: "obj_1".to_string(),
             properties: props1,
             indexed_at: Utc::now(),
+            source_last_modified: None,
+            refresh_frequency: None,
+            next_refresh: None,
+            refresh_status: RefreshStatus::UpToDate,
         });
 
         let mut props2 = PropertyMap::new();
@@ -2270,6 +2473,10 @@ mod tests {
             object_id: "obj_2".to_string(),
             properties: props2,
             indexed_at: Utc::now(),
+            source_last_modified: None,
+            refresh_frequency: None,
+            next_refresh: None,
+            refresh_status: RefreshStatus::UpToDate,
         });
 
         let mut props3 = PropertyMap::new();
@@ -2281,6 +2488,10 @@ mod tests {
             object_id: "obj_3".to_string(),
             properties: props3,
             indexed_at: Utc::now(),
+            source_last_modified: None,
+            refresh_frequency: None,
+            next_refresh: None,
+            refresh_status: RefreshStatus::UpToDate,
         });
 
         // 3. Write batch

@@ -112,6 +112,7 @@ mod tests {
                     sensitivity_tags: Vec::new(),
                     pii: false,
                     deprecated: None,
+                    statistics: None,
                 },
             ],
             required_link_types: Vec::new(),
@@ -120,6 +121,7 @@ mod tests {
     
     fn create_implementing_object_type() -> ObjectType {
         ObjectType {
+            schema_evolution: None,
             id: "office".to_string(),
             display_name: "Office".to_string(),
             primary_key: "id".to_string(),
@@ -168,11 +170,13 @@ mod tests {
                     sensitivity_tags: Vec::new(),
                     pii: false,
                     deprecated: None,
+                    statistics: None,
                 },
             ],
             backing_datasource: None,
             title_key: Some("id".to_string()),
             implements: vec!["Location".to_string()],
+            schema_evolution: None,
         }
     }
     
