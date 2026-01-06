@@ -30,6 +30,10 @@ pub struct OntologyDef {
     #[serde(rename = "functionTypes")]
     #[serde(default)]
     pub function_types: Vec<FunctionTypeDef>,
+    
+    #[serde(rename = "modelObjectives")]
+    #[serde(default)]
+    pub model_objectives: Vec<crate::model_objectives::ModelObjective>,
 }
 
 /// Interface definition - represents a contract that object types can implement
@@ -548,6 +552,7 @@ mod tests {
                     pii: false,
                     deprecated: None,
                     statistics: None,
+                    model_binding: None,
                 },
                 Property {
                     id: "name".to_string(),
@@ -564,6 +569,7 @@ mod tests {
                     pii: false,
                     deprecated: None,
                     statistics: None,
+                    model_binding: None,
                 },
             ],
             backing_datasource: None,

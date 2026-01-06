@@ -11,6 +11,8 @@ pub mod interface;
 pub mod function;
 pub mod property_groups;
 pub mod computed_properties;
+pub mod model_objectives;
+pub mod model_executor;
 
 pub use meta_model::{ObjectType, LinkTypeDef, ActionTypeDef, InterfaceDef, FunctionTypeDef, FunctionLogic, FunctionReturnType, AggregationType, OntologyRuntime as Ontology, OntologyConfig, OntologyDef};
 pub use property::{PropertyType, Property, PropertyValue, PropertyMap};
@@ -23,4 +25,6 @@ pub use interface::InterfaceValidator;
 pub use function::{FunctionExecutor, FunctionExecutionResult};
 pub use property_groups::{PropertyGroup, PropertyGroupManager};
 pub use computed_properties::{ComputedProperty, ComputedPropertyEvaluator, ComputedPropertyError, ComputedExpression};
+pub use model_objectives::{ModelObjective, ModelRegistry, ModelBinding, ModelMetrics, ModelType, ModelStatus, ModelPlatform, ModelBindingConfig, ModelComparison};
+pub use model_executor::{ModelExecutor, PythonModelExecutor, RemoteModelExecutor, ModelExecutionOrchestrator, ModelExecutionResult, ModelExecutionError};
 

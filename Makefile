@@ -58,6 +58,10 @@ help: ## Show this help message
 	@echo "  - foundry-rules"
 	@echo "  - machinery"
 	@echo "  - dynamic-scheduling"
+	@echo "  - function-executor (NEW)"
+	@echo "  - interface-explorer (NEW)"
+	@echo "  - ontology-viewer (NEW)"
+	@echo "  - model-manager (NEW)"
 	@echo ""
 	@echo "$(GREEN)Build:$(NC)"
 	@echo "  make build            Build both backend and frontend"
@@ -152,13 +156,13 @@ dev: ## Run both backend and frontend together
 	@echo "$(GREEN)Frontend: http://localhost:$(FRONTEND_PORT)$(NC)"
 	@echo "$(YELLOW)Press Ctrl+C to stop both$(NC)"
 	@bash -c 'trap "kill 0" EXIT; \
-	cd rust-core/graphql-api && \
+	(cd rust-core/graphql-api && \
 	PORT=$(BACKEND_PORT) \
 	ONTOLOGY_PATH=../../$(ONTOLOGY_PATH) \
-	cargo run --bin server & \
+	cargo run --bin server) & \
 	BACKEND_PID=$$!; \
 	sleep 3; \
-	cd ../../ui-framework/apps/$(APP_NAME) && \
+	cd ui-framework/apps/$(APP_NAME) && \
 	PORT=$(FRONTEND_PORT) \
 	VITE_GRAPHQL_URL=http://localhost:$(BACKEND_PORT) \
 	npm run dev & \
@@ -260,4 +264,16 @@ financial-portfolio: dev ## Run financial-portfolio app with backend
 census-example: APP_NAME=census-example FRONTEND_PORT=3005
 census-example: dev ## Run census-example app with backend
 
-.PHONY: help install install-backend install-frontend services-up services-down services-logs services-status backend frontend dev start build build-backend build-frontend clean stop kill test object-explorer object-views vertex map-app financial-portfolio census-example
+function-executor: APP_NAME=function-executor FRONTEND_PORT=5180
+function-executor: dev ## Run function-executor app with backend
+
+interface-explorer: APP_NAME=interface-explorer FRONTEND_PORT=5181
+interface-explorer: dev ## Run interface-explorer app with backend
+
+ontology-viewer: APP_NAME=ontology-viewer FRONTEND_PORT=5182
+ontology-viewer: dev ## Run ontology-viewer app with backend
+
+model-manager: APP_NAME=model-manager FRONTEND_PORT=5185
+model-manager: dev ## Run model-manager app with backend
+
+.PHONY: help install install-backend install-frontend services-up services-down services-logs services-status backend frontend dev start build build-backend build-frontend clean stop kill test object-explorer object-views vertex map-app financial-portfolio census-example function-executor interface-explorer ontology-viewer model-manager

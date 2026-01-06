@@ -25,6 +25,7 @@ async-graphql = "5.0"
 async-graphql-axum = "5.0"
 axum = "0.7"
 lazy_static = "1.4"
+tower-http = { version = "0.5", features = ["cors"] }
 
 [[test]]
 name = "resolvers_test"

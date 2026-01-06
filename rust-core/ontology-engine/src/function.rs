@@ -192,7 +192,8 @@ mod tests {
                     sensitivity_tags: Vec::new(),
                     pii: false,
                     deprecated: None,
-                },
+                    statistics: None,
+                    model_binding: None,                },
             ],
             return_type: FunctionReturnType::Property {
                 property_type: PropertyType::Double,

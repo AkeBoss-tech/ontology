@@ -227,6 +227,12 @@ pub struct Property {
     // Statistical metadata (computed during indexing)
     #[serde(default)]
     pub statistics: Option<PropertyStatistics>,
+    
+    // Model binding - links this property to an ML model
+    #[serde(rename = "modelBinding")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_binding: Option<String>, // Model ID
 }
 
 fn deserialize_property_type<'de, D>(deserializer: D) -> Result<PropertyType, D::Error>
@@ -364,6 +370,7 @@ impl Property {
                         pii: false,
                         deprecated: None,
                         statistics: None,
+                        model_binding: None,
                     };
                     element_prop.validate_value_with_reference_check(item, reference_checker)
                         .map_err(|e| format!("Array element {}: {}", idx, e))?;
@@ -388,6 +395,7 @@ impl Property {
                         pii: false,
                         deprecated: None,
                         statistics: None,
+                        model_binding: None,
                     };
                     // Convert key to PropertyValue based on key type
                     let key_value = match key_type.as_ref() {
@@ -418,6 +426,7 @@ impl Property {
                         pii: false,
                         deprecated: None,
                         statistics: None,
+                        model_binding: None,
                     };
                     val_prop.validate_value_with_reference_check(val, reference_checker)
                         .map_err(|e| format!("Map value for key '{}': {}", key, e))?;
@@ -468,6 +477,7 @@ impl Property {
                         pii: false,
                         deprecated: None,
                         statistics: None,
+                        model_binding: None,
                     };
                     match union_prop.validate_value_with_reference_check(value, reference_checker) {
                         Ok(()) => {
@@ -816,7 +826,8 @@ mod tests {
             sensitivity_tags: Vec::new(),
             pii: false,
             deprecated: None,
-        };
+                    statistics: None,
+                    model_binding: None,        };
         
         assert!(prop.validate_value(&PropertyValue::String("test".to_string())).is_ok());
         assert!(prop.validate_value(&PropertyValue::String("ab".to_string())).is_err()); // Too short
@@ -846,7 +857,8 @@ mod tests {
             sensitivity_tags: Vec::new(),
             pii: false,
             deprecated: None,
-        };
+                    statistics: None,
+                    model_binding: None,        };
         
         assert!(prop.validate_value(&PropertyValue::Integer(50)).is_ok());
         assert!(prop.validate_value(&PropertyValue::Integer(5)).is_err()); // Too small
@@ -876,7 +888,8 @@ mod tests {
             sensitivity_tags: Vec::new(),
             pii: false,
             deprecated: None,
-        };
+                    statistics: None,
+                    model_binding: None,        };
         
         assert!(prop.validate_value(&PropertyValue::String("option1".to_string())).is_ok());
         assert!(prop.validate_value(&PropertyValue::String("invalid".to_string())).is_err());

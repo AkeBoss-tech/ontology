@@ -49,7 +49,6 @@ Thumbs.db
 
 
 # ignore markdown files in just the root directory
-*.md
 !README.md
 !ARCHITECTURE.md
 !APPLICATION_GUIDE.md

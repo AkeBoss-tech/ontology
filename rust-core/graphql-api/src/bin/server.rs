@@ -187,12 +187,18 @@ async fn main() {
             .unwrap()
     }
     
-    // Create router
+    // Create router with CORS
     let app = Router::new()
         .route("/graphql", axum::routing::post(graphql_handler).get(graphql_playground))
         .route("/", get(|| async { 
             "Ontology GraphQL API\n\nGraphQL endpoint: /graphql\nPlayground: /graphql"
         }))
+        .layer(
+            tower_http::cors::CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any)
+        )
         .with_state(schema);
     
     let port = std::env::var("PORT")
