@@ -28,17 +28,6 @@ ontology:
       titleKey: "name"
   linkTypes: []
   actionTypes: []
-  functionTypes:
-    - id: "test_function"
-      displayName: "Test Function"
-      cacheable: true
-      returnType:
-        type: "property"
-        propertyType: "integer"
-      logic:
-        type: "property_access"
-        property: "test_prop"
-      parameters: []
 "#;
     
     let ontology = Ontology::from_yaml(yaml).expect("Failed to create test ontology");
@@ -90,6 +79,7 @@ async fn test_function_caching() {
 }
 
 #[tokio::test]
+#[ignore = "Requires Elasticsearch running on localhost:9200"]
 async fn test_graphql_json_types() {
     // Test that GraphQL returns Json types instead of strings
     let schema = create_test_schema().await;
@@ -123,19 +113,20 @@ async fn test_graphql_json_types() {
     "#;
     
     let response = schema.execute(query).await;
-    
-    // Verify response structure
-    assert!(response.is_ok(), "Query should succeed");
-    let result = response.unwrap();
-    
+
+    // Verify response structure (Response is not a Result; check errors instead)
+    assert!(response.errors.is_empty(), "Query should succeed, got errors: {:?}", response.errors);
+
     // Verify that properties is a Json type (not a string)
     // In the actual GraphQL response, properties should be a JSON object
-    if let Some(data) = result.data.get("searchObjects") {
-        if let GraphQLValue::List(items) = data {
-            if let Some(GraphQLValue::Object(obj)) = items.first() {
-                if let Some(GraphQLValue::Object(properties)) = obj.get("properties") {
-                    // Properties should be a JSON object, not a string
-                    assert!(properties.is_object(), "Properties should be a JSON object");
+    if let async_graphql::Value::Object(data) = &response.data {
+        if let Some(search_objects) = data.get("searchObjects") {
+            if let GraphQLValue::List(items) = search_objects {
+                if let Some(GraphQLValue::Object(obj)) = items.first() {
+                    if let Some(GraphQLValue::Object(properties)) = obj.get("properties") {
+                        // We matched on Object variant, so it is already confirmed to be an object
+                        assert!(!properties.is_empty(), "Properties object should not be empty");
+                    }
                 }
             }
         }
@@ -163,6 +154,6 @@ async fn test_count_objects_query() {
     "#;
     
     let response = schema.execute(query).await;
-    assert!(response.is_ok(), "Query should succeed");
+    assert!(response.errors.is_empty(), "Query should succeed, got errors: {:?}", response.errors);
 }
 

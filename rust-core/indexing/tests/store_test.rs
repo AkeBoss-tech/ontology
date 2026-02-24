@@ -26,6 +26,7 @@ async fn create_test_dgraph_store() -> Option<DgraphStore> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Elasticsearch running on localhost:9200"]
 async fn test_elasticsearch_count_objects() {
     let store = match create_test_elasticsearch_store() {
         Some(s) => s,
@@ -72,6 +73,7 @@ async fn test_elasticsearch_count_objects() {
 }
 
 #[tokio::test]
+#[ignore = "Requires Elasticsearch running on localhost:9200"]
 async fn test_elasticsearch_bulk_index() {
     let store = match create_test_elasticsearch_store() {
         Some(s) => s,
@@ -95,6 +97,10 @@ async fn test_elasticsearch_bulk_index() {
             object_id: format!("bulk_{}", i),
             properties,
             indexed_at: chrono::Utc::now(),
+            source_last_modified: None,
+            refresh_frequency: None,
+            next_refresh: None,
+            refresh_status: indexing::store::RefreshStatus::UpToDate,
         });
     }
     
@@ -122,6 +128,7 @@ async fn test_elasticsearch_bulk_index() {
 }
 
 #[tokio::test]
+#[ignore = "Requires Elasticsearch running on localhost:9200"]
 async fn test_elasticsearch_alias_operations() {
     let store = match create_test_elasticsearch_store() {
         Some(s) => s,
@@ -172,6 +179,7 @@ async fn test_elasticsearch_alias_operations() {
 }
 
 #[tokio::test]
+#[ignore = "Requires Dgraph running on localhost:9080"]
 async fn test_dgraph_traverse_with_filters() {
     let store = match create_test_dgraph_store().await {
         Some(s) => {
@@ -218,7 +226,8 @@ async fn test_dgraph_traverse_with_filters() {
     
     // Result may be empty if nodes don't have the property, but should not error
     assert!(result.is_ok(), "Traverse with filters should not error");
-    
+    let result = result.unwrap();
+
     // Should only return target2 (weight=20 > 15)
     assert!(result.contains(&"target2".to_string()), "Expected target2 in filtered results");
     assert!(!result.contains(&"target1".to_string()), "Expected target1 to be filtered out");
@@ -229,6 +238,7 @@ async fn test_dgraph_traverse_with_filters() {
 }
 
 #[tokio::test]
+#[ignore = "Requires Dgraph running on localhost:9080"]
 async fn test_dgraph_traverse_with_aggregation() {
     let store = match create_test_dgraph_store().await {
         Some(s) => {
@@ -273,6 +283,7 @@ async fn test_dgraph_traverse_with_aggregation() {
 }
 
 #[tokio::test]
+#[ignore = "Requires Elasticsearch running on localhost:9200"]
 async fn test_search_with_filters() {
     let store = match create_test_elasticsearch_store() {
         Some(s) => s,

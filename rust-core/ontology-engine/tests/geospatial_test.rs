@@ -28,6 +28,8 @@ fn test_geojson_validation() {
         sensitivity_tags: vec![],
         pii: false,
         deprecated: None,
+        statistics: None,
+        model_binding: None,
     };
 
     // Valid GeoJSON

@@ -56,6 +56,7 @@ impl Compiler {
             action_types: vec![], // Will be filled from sidecar
             interfaces,
             function_types: vec![], // Will be filled from sidecar
+            model_objectives: vec![],
         })
     }
 
@@ -266,6 +267,7 @@ impl Compiler {
                          pii: false,
                          deprecated: None,
                          statistics: None,
+                         model_binding: None,
                      });
                  }
              }

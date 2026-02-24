@@ -98,6 +98,10 @@ async fn test_bulk_indexing_flow() {
             object_id: format!("bulk_{}", i),
             properties,
             indexed_at: chrono::Utc::now(),
+            source_last_modified: None,
+            refresh_frequency: None,
+            next_refresh: None,
+            refresh_status: indexing::store::RefreshStatus::UpToDate,
         });
     }
     

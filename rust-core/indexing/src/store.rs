@@ -2195,13 +2195,10 @@ impl ColumnarStore for ParquetStore {
             json_objects.push(Self::indexed_object_to_json(obj)?);
         }
 
-        // 2. Serialize to NDJSON (Newline Delimited JSON)
-        let mut json_buffer = Vec::new();
-        for item in &json_objects {
-            serde_json::to_writer(&mut json_buffer, item)
-                .map_err(|e| StoreError::WriteError(format!("Serialization error: {}", e)))?;
-            json_buffer.push(b'\n');
-        }
+        // 2. Serialize as a JSON array (polars JsonReader expects an array, not NDJSON)
+        let json_array = JsonValue::Array(json_objects);
+        let json_buffer = serde_json::to_vec(&json_array)
+            .map_err(|e| StoreError::WriteError(format!("Serialization error: {}", e)))?;
 
         // 3. Load into Polars DataFrame
         let cursor = Cursor::new(json_buffer);

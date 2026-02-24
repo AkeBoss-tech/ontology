@@ -114,7 +114,7 @@ mod tests {
                     pii: false,
                     deprecated: None,
                     statistics: None,
-                    model_binding: None,                    statistics: None,
+                    model_binding: None,
                 },
             ],
             required_link_types: Vec::new(),
@@ -123,7 +123,6 @@ mod tests {
     
     fn create_implementing_object_type() -> ObjectType {
         ObjectType {
-            schema_evolution: None,
             id: "office".to_string(),
             display_name: "Office".to_string(),
             primary_key: "id".to_string(),
@@ -143,7 +142,8 @@ mod tests {
                     pii: false,
                     deprecated: None,
                     statistics: None,
-                    model_binding: None,                },
+                    model_binding: None,
+                },
                 Property {
                     id: "latitude".to_string(),
                     display_name: None,
@@ -159,7 +159,8 @@ mod tests {
                     pii: false,
                     deprecated: None,
                     statistics: None,
-                    model_binding: None,                },
+                    model_binding: None,
+                },
                 Property {
                     id: "longitude".to_string(),
                     display_name: None,
@@ -175,7 +176,7 @@ mod tests {
                     pii: false,
                     deprecated: None,
                     statistics: None,
-                    model_binding: None,                    statistics: None,
+                    model_binding: None,
                 },
             ],
             backing_datasource: None,
