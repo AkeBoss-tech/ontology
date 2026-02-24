@@ -181,19 +181,54 @@ impl QueryRoot {
         object_id: String,
     ) -> FieldResult<Option<ObjectResult>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
-        let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
-        let hydrator = ctx.data::<ObjectHydrator>()?;
-        
+
         let object_type_def = ontology.get_object_type(&object_type)
             .ok_or_else(|| async_graphql::Error::new("Object type not found"))?;
-        
+
+        // Try in-memory store first
+        let data_store = ctx.data::<Arc<tokio::sync::RwLock<HashMap<String, Vec<Value>>>>>();
+        if let Ok(store) = data_store {
+            let store_read = store.read().await;
+            if let Some(objects) = store_read.get(&object_type) {
+                let pk = &object_type_def.primary_key;
+                let found = objects.iter().find(|obj| {
+                    obj.get(pk).map_or(false, |v| {
+                        v.as_str().map_or(false, |s| s == object_id)
+                            || v.as_i64().map_or(false, |i| i.to_string() == object_id)
+                            || v.as_f64().map_or(false, |f| f.to_string() == object_id)
+                    })
+                });
+
+                if let Some(obj) = found {
+                    let title = object_type_def.title_key
+                        .as_ref()
+                        .and_then(|key| obj.get(key))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| object_id.clone());
+                    return Ok(Some(ObjectResult {
+                        object_type: object_type.clone(),
+                        object_id: object_id.clone(),
+                        title,
+                        properties: Json(obj.clone()),
+                    }));
+                }
+                // Object type found in store, but this specific ID is not — skip ES lookup
+                return Ok(None);
+            }
+        }
+
+        // Fallback to Elasticsearch
+        let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
+        let hydrator = ctx.data::<ObjectHydrator>()?;
+
         let indexed = search_store.get_object(&object_type, &object_id).await
             .map_err(|e| async_graphql::Error::new(format!("Get error: {}", e)))?;
-        
+
         if let Some(indexed) = indexed {
             let hydrated = hydrator.hydrate_from_indexed(&indexed, object_type_def)
                 .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
-            
+
             let properties_json: Value = serde_json::to_value(&hydrated.properties)
                 .unwrap_or_else(|_| serde_json::json!({}));
             Ok(Some(ObjectResult {
@@ -568,17 +603,147 @@ impl QueryRoot {
             }
         }
         
-        // Build analytics query
+        let group_by_cols = group_by.unwrap_or_default();
+
+        // Try in-memory store before falling back to Parquet
+        let data_store = ctx.data::<Arc<tokio::sync::RwLock<HashMap<String, Vec<Value>>>>>();
+        if let Ok(store) = data_store {
+            let store_read = store.read().await;
+            if let Some(objects) = store_read.get(&object_type) {
+                // Apply filters
+                let filtered: Vec<&Value> = objects.iter().filter(|obj| {
+                    store_filters.iter().all(|filter| {
+                        obj.get(&filter.property).map_or(false, |prop_val| {
+                            match &filter.operator {
+                                indexing::store::FilterOperator::Equals => match &filter.value {
+                                    ontology_engine::PropertyValue::String(s) => prop_val.as_str().map_or(false, |v| v == s),
+                                    ontology_engine::PropertyValue::Integer(i) => prop_val.as_i64().map_or(false, |v| v == *i),
+                                    ontology_engine::PropertyValue::Double(d) => prop_val.as_f64().map_or(false, |v| (v - d).abs() < 0.0001),
+                                    _ => false,
+                                },
+                                indexing::store::FilterOperator::GreaterThan => match &filter.value {
+                                    ontology_engine::PropertyValue::Integer(i) => prop_val.as_i64().map_or(false, |v| v > *i),
+                                    ontology_engine::PropertyValue::Double(d) => prop_val.as_f64().map_or(false, |v| v > *d),
+                                    _ => false,
+                                },
+                                indexing::store::FilterOperator::LessThan => match &filter.value {
+                                    ontology_engine::PropertyValue::Integer(i) => prop_val.as_i64().map_or(false, |v| v < *i),
+                                    ontology_engine::PropertyValue::Double(d) => prop_val.as_f64().map_or(false, |v| v < *d),
+                                    _ => false,
+                                },
+                                _ => true,
+                            }
+                        })
+                    })
+                }).collect();
+
+                let total = filtered.len();
+
+                let compute_aggs = |items: &[&Value]| -> serde_json::Map<String, Value> {
+                    let mut row = serde_json::Map::new();
+                    for agg in &store_aggregations {
+                        match agg {
+                            indexing::store::Aggregation::Count => {
+                                row.insert("count".to_string(), Value::Number(items.len().into()));
+                            }
+                            indexing::store::Aggregation::Sum(prop) => {
+                                let sum: f64 = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).sum();
+                                row.insert(format!("sum_{}", prop), Value::Number(serde_json::Number::from_f64(sum).unwrap_or(0.into())));
+                            }
+                            indexing::store::Aggregation::Avg(prop) => {
+                                let vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
+                                let avg = if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 };
+                                row.insert(format!("avg_{}", prop), Value::Number(serde_json::Number::from_f64(avg).unwrap_or(0.into())));
+                            }
+                            indexing::store::Aggregation::Min(prop) => {
+                                let min = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).fold(f64::INFINITY, f64::min);
+                                let min_val = if min.is_finite() { min } else { 0.0 };
+                                row.insert(format!("min_{}", prop), Value::Number(serde_json::Number::from_f64(min_val).unwrap_or(0.into())));
+                            }
+                            indexing::store::Aggregation::Max(prop) => {
+                                let max = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).fold(f64::NEG_INFINITY, f64::max);
+                                let max_val = if max.is_finite() { max } else { 0.0 };
+                                row.insert(format!("max_{}", prop), Value::Number(serde_json::Number::from_f64(max_val).unwrap_or(0.into())));
+                            }
+                            indexing::store::Aggregation::Median(prop) => {
+                                let mut vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
+                                vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                                let median = if vals.is_empty() { 0.0 } else if vals.len() % 2 == 0 { (vals[vals.len()/2 - 1] + vals[vals.len()/2]) / 2.0 } else { vals[vals.len()/2] };
+                                row.insert(format!("median_{}", prop), Value::Number(serde_json::Number::from_f64(median).unwrap_or(0.into())));
+                            }
+                            indexing::store::Aggregation::StdDev(prop) => {
+                                let vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
+                                let mean = if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 };
+                                let variance = if vals.len() < 2 { 0.0 } else { vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (vals.len() - 1) as f64 };
+                                row.insert(format!("stddev_{}", prop), Value::Number(serde_json::Number::from_f64(variance.sqrt()).unwrap_or(0.into())));
+                            }
+                            indexing::store::Aggregation::Variance(prop) => {
+                                let vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
+                                let mean = if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 };
+                                let variance = if vals.len() < 2 { 0.0 } else { vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (vals.len() - 1) as f64 };
+                                row.insert(format!("variance_{}", prop), Value::Number(serde_json::Number::from_f64(variance).unwrap_or(0.into())));
+                            }
+                            indexing::store::Aggregation::DistinctCount(prop) => {
+                                let distinct: std::collections::HashSet<String> = items.iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .map(|v| v.to_string())
+                                    .collect();
+                                row.insert(format!("distinct_count_{}", prop), Value::Number(distinct.len().into()));
+                            }
+                            indexing::store::Aggregation::Percentile(prop, pct) => {
+                                let mut vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
+                                vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                                let idx = ((vals.len() as f64 * pct) as usize).min(vals.len().saturating_sub(1));
+                                let pct_val = vals.get(idx).copied().unwrap_or(0.0);
+                                row.insert(format!("p{}_{}", (*pct * 100.0) as u8, prop), Value::Number(serde_json::Number::from_f64(pct_val).unwrap_or(0.into())));
+                            }
+                            _ => {}
+                        }
+                    }
+                    row
+                };
+
+                let rows: Vec<Value> = if group_by_cols.is_empty() {
+                    let row = compute_aggs(&filtered);
+                    vec![Value::Object(row)]
+                } else {
+                    let group_key = &group_by_cols[0];
+                    let mut groups: std::collections::HashMap<String, Vec<&Value>> = std::collections::HashMap::new();
+                    for obj in &filtered {
+                        let key = obj.get(group_key).map(|v| v.to_string()).unwrap_or_default();
+                        groups.entry(key).or_default().push(obj);
+                    }
+                    let mut result_rows: Vec<Value> = groups.into_iter().map(|(group_val, group_items)| {
+                        let mut row = compute_aggs(&group_items);
+                        row.insert(group_key.clone(), Value::String(group_val));
+                        Value::Object(row)
+                    }).collect();
+                    result_rows.sort_by(|a, b| {
+                        let ka = a.get(group_key).map(|v| v.to_string()).unwrap_or_default();
+                        let kb = b.get(group_key).map(|v| v.to_string()).unwrap_or_default();
+                        ka.cmp(&kb)
+                    });
+                    result_rows
+                };
+
+                return Ok(AggregationResult {
+                    rows: Json(Value::Array(rows)),
+                    total,
+                });
+            }
+        }
+
+        // Build analytics query for Parquet fallback
         let query = indexing::store::AnalyticsQuery {
             aggregations: store_aggregations,
             filters: store_filters,
-            group_by: group_by.unwrap_or_default(),
+            group_by: group_by_cols,
         };
-        
+
         // Execute aggregation
         let result = columnar_store.query_analytics(&object_type, &query).await
             .map_err(|e| async_graphql::Error::new(format!("Aggregation error: {}", e)))?;
-        
+
         // Convert results
         let rows: Vec<serde_json::Value> = result.rows.iter()
             .map(|row| {
@@ -589,7 +754,7 @@ impl QueryRoot {
                 serde_json::Value::Object(json_row)
             })
             .collect();
-        
+
         Ok(AggregationResult {
             rows: Json(Value::Array(rows)),
             total: result.total,

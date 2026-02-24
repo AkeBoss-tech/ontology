@@ -113,28 +113,61 @@ impl ComputedPropertyEvaluator {
     }
     
     fn evaluate_arithmetic(expression: &str, properties: &PropertyMap) -> Result<PropertyValue, ComputedPropertyError> {
-        // Simple arithmetic evaluation (would need a proper expression parser in production)
-        // For now, support simple operations like "property1 + property2"
-        let mut result = 0.0;
         let parts: Vec<&str> = expression.split_whitespace().collect();
-        
-        for part in parts {
-            if let Some(prop_value) = properties.get(part) {
-                match prop_value {
-                    PropertyValue::Integer(i) => result += *i as f64,
-                    PropertyValue::Double(d) => result += d,
-                    _ => return Err(ComputedPropertyError::InvalidType(
-                        format!("Property {} is not numeric", part)
-                    )),
+
+        let mut accumulator: Option<f64> = None;
+        let mut pending_op: char = '+';
+
+        for part in &parts {
+            match *part {
+                "+" | "-" | "*" | "/" => {
+                    pending_op = part.chars().next().unwrap();
                 }
-            } else if let Ok(num) = part.parse::<f64>() {
-                result += num;
-            } else if part == "+" || part == "-" || part == "*" || part == "/" {
-                // Operator handling would go here
+                _ => {
+                    let value = if let Some(prop_val) = properties.get(*part) {
+                        match prop_val {
+                            PropertyValue::Integer(i) => *i as f64,
+                            PropertyValue::Double(d) => *d,
+                            _ => return Err(ComputedPropertyError::InvalidType(
+                                format!("Property '{}' is not numeric", part)
+                            )),
+                        }
+                    } else if let Ok(num) = part.parse::<f64>() {
+                        num
+                    } else {
+                        return Err(ComputedPropertyError::EvaluationError(
+                            format!("Unknown token '{}': not a property name or number", part)
+                        ));
+                    };
+
+                    accumulator = Some(match accumulator {
+                        None => value,
+                        Some(acc) => match pending_op {
+                            '+' => acc + value,
+                            '-' => acc - value,
+                            '*' => acc * value,
+                            '/' => {
+                                if value == 0.0 {
+                                    return Err(ComputedPropertyError::EvaluationError(
+                                        "Division by zero".to_string()
+                                    ));
+                                }
+                                acc / value
+                            }
+                            _ => value,
+                        },
+                    });
+                    pending_op = '+';
+                }
             }
         }
-        
-        Ok(PropertyValue::Double(result))
+
+        match accumulator {
+            Some(r) => Ok(PropertyValue::Double(r)),
+            None => Err(ComputedPropertyError::EvaluationError(
+                "Empty arithmetic expression".to_string()
+            )),
+        }
     }
     
     fn evaluate_function(
@@ -147,13 +180,68 @@ impl ComputedPropertyEvaluator {
     }
     
     fn evaluate_conditional(
-        _condition: &str,
-        _then_expr: &str,
-        _else_expr: &str,
-        _properties: &PropertyMap,
+        condition: &str,
+        then_expr: &str,
+        else_expr: &str,
+        properties: &PropertyMap,
     ) -> Result<PropertyValue, ComputedPropertyError> {
-        // Conditional evaluation would be implemented here
-        Err(ComputedPropertyError::NotImplemented("Conditional evaluation not yet implemented".to_string()))
+        // Parse condition: "operand1 op operand2"
+        let parts: Vec<&str> = condition.splitn(3, ' ').collect();
+        if parts.len() != 3 {
+            return Err(ComputedPropertyError::EvaluationError(
+                format!("Invalid condition '{}'. Expected format: 'property op value'", condition)
+            ));
+        }
+        let (operand1, op, operand2) = (parts[0], parts[1], parts[2]);
+
+        let val1 = Self::resolve_token(operand1, properties);
+        let val2 = Self::resolve_token(operand2, properties);
+
+        let condition_met = match op {
+            "==" | "=" => val1 == val2,
+            "!=" => val1 != val2,
+            ">" => Self::compare_values(&val1, &val2).map_or(false, |o| o == std::cmp::Ordering::Greater),
+            ">=" => Self::compare_values(&val1, &val2).map_or(false, |o| o != std::cmp::Ordering::Less),
+            "<" => Self::compare_values(&val1, &val2).map_or(false, |o| o == std::cmp::Ordering::Less),
+            "<=" => Self::compare_values(&val1, &val2).map_or(false, |o| o != std::cmp::Ordering::Greater),
+            _ => return Err(ComputedPropertyError::EvaluationError(
+                format!("Unknown operator '{}'. Valid: ==, !=, >, >=, <, <=", op)
+            )),
+        };
+
+        let branch = if condition_met { then_expr } else { else_expr };
+        Ok(Self::resolve_token(branch, properties))
+    }
+
+    fn resolve_token(token: &str, properties: &PropertyMap) -> PropertyValue {
+        if let Some(v) = properties.get(token) {
+            return v.clone();
+        }
+        if let Ok(i) = token.parse::<i64>() {
+            return PropertyValue::Integer(i);
+        }
+        if let Ok(f) = token.parse::<f64>() {
+            return PropertyValue::Double(f);
+        }
+        if token == "true" { return PropertyValue::Boolean(true); }
+        if token == "false" { return PropertyValue::Boolean(false); }
+        if token == "null" { return PropertyValue::Null; }
+        // Strip surrounding quotes if present
+        if (token.starts_with('"') && token.ends_with('"')) || (token.starts_with('\'') && token.ends_with('\'')) {
+            return PropertyValue::String(token[1..token.len()-1].to_string());
+        }
+        PropertyValue::String(token.to_string())
+    }
+
+    fn compare_values(a: &PropertyValue, b: &PropertyValue) -> Option<std::cmp::Ordering> {
+        match (a, b) {
+            (PropertyValue::Integer(x), PropertyValue::Integer(y)) => Some(x.cmp(y)),
+            (PropertyValue::Double(x), PropertyValue::Double(y)) => x.partial_cmp(y),
+            (PropertyValue::Integer(x), PropertyValue::Double(y)) => (*x as f64).partial_cmp(y),
+            (PropertyValue::Double(x), PropertyValue::Integer(y)) => x.partial_cmp(&(*y as f64)),
+            (PropertyValue::String(x), PropertyValue::String(y)) => Some(x.cmp(y)),
+            _ => None,
+        }
     }
     
     fn evaluate_string_format(template: &str, properties: &PropertyMap) -> Result<PropertyValue, ComputedPropertyError> {
@@ -189,13 +277,97 @@ impl ComputedPropertyEvaluator {
 pub enum ComputedPropertyError {
     #[error("Missing dependency: {0}")]
     MissingDependency(String),
-    
+
     #[error("Invalid type: {0}")]
     InvalidType(String),
-    
+
     #[error("Not implemented: {0}")]
     NotImplemented(String),
-    
+
     #[error("Evaluation error: {0}")]
     EvaluationError(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn props(pairs: &[(&str, PropertyValue)]) -> PropertyMap {
+        let mut map = PropertyMap::new();
+        for (k, v) in pairs {
+            map.insert(k.to_string(), v.clone());
+        }
+        map
+    }
+
+    #[test]
+    fn test_arithmetic_addition() {
+        let p = props(&[("a", PropertyValue::Integer(3)), ("b", PropertyValue::Integer(7))]);
+        let result = ComputedPropertyEvaluator::evaluate_arithmetic("a + b", &p).unwrap();
+        assert_eq!(result, PropertyValue::Double(10.0));
+    }
+
+    #[test]
+    fn test_arithmetic_subtraction() {
+        let p = props(&[("x", PropertyValue::Double(10.0)), ("y", PropertyValue::Double(3.5))]);
+        let result = ComputedPropertyEvaluator::evaluate_arithmetic("x - y", &p).unwrap();
+        assert_eq!(result, PropertyValue::Double(6.5));
+    }
+
+    #[test]
+    fn test_arithmetic_multiply_literal() {
+        let p = props(&[("population", PropertyValue::Integer(1000)), ("area", PropertyValue::Double(50.0))]);
+        let result = ComputedPropertyEvaluator::evaluate_arithmetic("population / area", &p).unwrap();
+        assert_eq!(result, PropertyValue::Double(20.0));
+    }
+
+    #[test]
+    fn test_arithmetic_mixed() {
+        // 2 * 3 + 4 = 10
+        let p = props(&[]);
+        let result = ComputedPropertyEvaluator::evaluate_arithmetic("2 * 3 + 4", &p).unwrap();
+        assert_eq!(result, PropertyValue::Double(10.0));
+    }
+
+    #[test]
+    fn test_arithmetic_division_by_zero() {
+        let p = props(&[]);
+        let result = ComputedPropertyEvaluator::evaluate_arithmetic("10 / 0", &p);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_conditional_gt_true_branch() {
+        let p = props(&[("score", PropertyValue::Integer(75)), ("grade", PropertyValue::String("A".to_string()))]);
+        let result = ComputedPropertyEvaluator::evaluate_conditional("score > 50", "grade", "F", &p).unwrap();
+        assert_eq!(result, PropertyValue::String("A".to_string()));
+    }
+
+    #[test]
+    fn test_conditional_gt_false_branch() {
+        let p = props(&[("score", PropertyValue::Integer(30))]);
+        let result = ComputedPropertyEvaluator::evaluate_conditional("score > 50", "pass", "0", &p).unwrap();
+        assert_eq!(result, PropertyValue::Integer(0));
+    }
+
+    #[test]
+    fn test_conditional_eq_strings() {
+        let p = props(&[("status", PropertyValue::String("active".to_string()))]);
+        let result = ComputedPropertyEvaluator::evaluate_conditional("status == active", "1", "0", &p).unwrap();
+        assert_eq!(result, PropertyValue::Integer(1));
+    }
+
+    #[test]
+    fn test_conditional_neq() {
+        let p = props(&[("x", PropertyValue::Integer(5))]);
+        let result = ComputedPropertyEvaluator::evaluate_conditional("x != 5", "yes", "no", &p).unwrap();
+        assert_eq!(result, PropertyValue::String("no".to_string()));
+    }
+
+    #[test]
+    fn test_string_format() {
+        let p = props(&[("name", PropertyValue::String("Alice".to_string())), ("year", PropertyValue::Integer(2020))]);
+        let result = ComputedPropertyEvaluator::evaluate_string_format("{name} ({year})", &p).unwrap();
+        assert_eq!(result, PropertyValue::String("Alice (2020)".to_string()));
+    }
 }
