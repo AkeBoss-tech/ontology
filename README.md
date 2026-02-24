@@ -1,167 +1,318 @@
 # Ontology Framework
 
-A generic, Palantir-like Ontology-Driven Data Operating System built with Rust (for performance) and Python (for data science workloads).
+An ontology-driven data operating system inspired by Palantir Foundry. You define your domain as an **ontology** — object types, links between them, and actions — in a YAML file, and the system gives you a GraphQL API, full-text search, graph traversal, time-travel queries, and a suite of React UIs on top of any data source (SQL, CSV, APIs, Parquet/S3).
 
-## Architecture
+## What It Does
 
-The system follows a hub-and-spoke architecture with three main layers:
+Most data platforms require you to model your data around the storage layer. This system inverts that: you model your **domain** first (people, assets, transactions, locations, whatever) and the platform handles where and how data is stored.
 
-1. **Hydration Pipeline (Python)**: Ingest and transform data from various sources (SQL, CSV, APIs, Kafka)
-2. **Indexing Core (Rust)**: Multi-store synchronization (Elasticsearch for search, Dgraph/Neo4j for graph, Parquet/S3 for columnar)
-3. **Object API (Rust)**: GraphQL API with Object Level Security (OLS)
+**Concretely:**
+- Write a YAML ontology that declares object types, their properties, and how they link to each other
+- The Rust backend loads that ontology, exposes a GraphQL API (with a playground at `/graphql`), handles search and graph traversal, and applies per-object access rules
+- The React frontend apps connect to that API and let users browse objects, traverse relationships, visualize data on maps, and execute actions — without you writing custom API or UI code for each object type
 
-**For detailed architecture documentation, design choices, and rationale, see [ARCHITECTURE.md](./ARCHITECTURE.md)**
+## Current Status
 
-## Project Structure
+| Component | Status |
+|---|---|
+| GraphQL API (`:8080`) | Working — ontology loading, object search, graph traversal, link queries, ML model registry |
+| Object Explorer | Working |
+| Model Manager (`:5185`) | Working — register/bind ML models to object properties |
+| Function Executor (`:5180`) | Working |
+| Interface Explorer (`:5181`) | Working |
+| Ontology Viewer (`:5182`) | Working |
+| Census Example (`:3005`) | Working |
+| Python pipeline | Partial — code exists, backend returns mock predictions |
+| Elasticsearch / Dgraph / Parquet stores | Partial — trait interfaces done, implementations are stubs |
+| Financial Portfolio, Foundry Rules, Machinery apps | Skeleton / placeholder |
 
-```
-ontology/
-├── rust-core/              # Rust performance-critical components
-│   ├── ontology-engine/    # Core meta-model (ObjectType, LinkType, ActionType)
-│   ├── indexing/           # Multi-store indexer and sync service
-│   ├── graphql-api/        # GraphQL API server
-│   ├── security/           # Object Level Security (OLS)
-│   ├── versioning/         # Time-travel and event logging
-│   └── writeback/          # Write-back queue implementation
-├── python-pipeline/        # Python data science components
-│   ├── hydration/          # Schema mapping and data ingestion
-│   ├── transformers/       # Data transformation utilities
-│   └── analytics/          # Columnar analytics helpers
-├── ui-framework/           # React-based UI framework
-│   ├── packages/           # Shared UI packages
-│   │   ├── core/           # Core components (ObjectBrowser, ObjectSearch, etc.)
-│   │   ├── forms/          # Form components (DynamicForm, FilterBuilder)
-│   │   ├── graph/          # Graph visualization components
-│   │   └── map/            # Geospatial visualization components
-│   ├── apps/               # Domain-specific applications
-│   │   ├── census-example/ # Census data explorer example
-│   │   └── financial-portfolio/ # Financial portfolio manager example
-│   └── templates/          # Application templates
-│       └── app-template/   # Template for creating new applications
-├── config/                 # Ontology YAML/JSON definitions
-├── scripts/                # Utility scripts
-└── docs/                   # Architecture documentation
-```
-
-## Key Features
-
-- **Backing Dataset Independence**: Object types can be backed by any data source (SQL, APIs, CSV, etc.)
-- **First-Class Links**: Links between objects are first-class citizens with their own properties
-- **Time Travel**: Query objects at any point in time using event sourcing
-- **Dynamic Ontology Editing**: Add/modify object types, link types, and action types at runtime
-- **Write-Back Queue**: User edits overlay source data without modifying the original
-- **Multi-Store Architecture**: Separate optimized stores for search, graph traversal, and analytics
+See [`docs/what-works.md`](docs/what-works.md) for details.
 
 ## Getting Started
 
-### Quick Start with Makefile
+### Prerequisites
 
-The easiest way to get started is using the Makefile:
+- Rust (stable, via `rustup`)
+- Node.js 18+
+- Docker (only needed for `make start` which brings up Elasticsearch + Dgraph)
+
+### Install and Run
 
 ```bash
 # Install all dependencies
 make install
 
-# Run backend and frontend together
+# Run the GraphQL backend + Object Explorer together
 make dev
+# Backend:  http://localhost:8080/graphql (includes GraphQL playground)
+# Frontend: http://localhost:3000
 
-# Or run specific app
-make object-explorer
-make vertex
-make map-app
+# Or run a specific app
+make object-explorer     # port 3000
+make census-example      # port 3005
+make function-executor   # port 5180
+make interface-explorer  # port 5181
+make ontology-viewer     # port 5182
+
+# Start the full stack including Docker services (Elasticsearch, Dgraph)
+make start
 ```
 
-See `README_MAKEFILE.md` for all available commands.
-
-### Manual Setup
-
-#### Rust Components
+Ports and the ontology file path are configurable:
 
 ```bash
-cd rust-core
-cargo build --workspace
-cargo test --workspace
+make dev BACKEND_PORT=9090 FRONTEND_PORT=4000
+make dev ONTOLOGY_PATH=examples/census/config/census_ontology.yaml
 ```
 
-#### Python Components
+### Run backend or frontend independently
 
 ```bash
-cd python-pipeline
-pip install -e .
+# Backend only
+make backend
+
+# Specific frontend app only
+make frontend APP_NAME=vertex
 ```
 
-### Example Ontology
+## Defining an Ontology
 
-See `config/example_ontology.yaml` for an example ontology definition.
+Everything starts with a YAML ontology file. The backend loads this at startup and generates the GraphQL schema from it dynamically. Here's the structure:
 
-### UI Framework and Applications
+```yaml
+ontology:
+  objectTypes:
+    - id: "person"
+      displayName: "Person"
+      primaryKey: "id"
+      titleKey: "name"
+      backingDatasource: "postgres://people_table"
+      properties:
+        - id: "name"
+          type: "string"
+          required: true
+        - id: "age"
+          type: "integer"
+        - id: "location"
+          type: "geojson"
 
-The project includes a React-based UI framework for building Palantir-like applications:
+    - id: "organization"
+      displayName: "Organization"
+      primaryKey: "org_id"
+      titleKey: "name"
+      properties:
+        - id: "name"
+          type: "string"
+          required: true
+        - id: "industry"
+          type: "string"
 
-- **Shared Packages**: Reusable components for ontology interactions
-  - `@ontology/core`: GraphQL client, ObjectBrowser, ObjectSearch, PropertyEditor
-  - `@ontology/forms`: DynamicForm, FilterBuilder
-  - `@ontology/graph`: GraphVisualization
-  - `@ontology/map`: MapView, TimeSlider
+  linkTypes:
+    - id: "person_works_at"
+      displayName: "Works At"
+      sourceObjectType: "person"
+      targetObjectType: "organization"
+      cardinality: "many_to_one"
 
-- **Example Applications**: 
-  - See `ui-framework/APPLICATIONS.md` for a complete list of example applications
-  - Includes: Object Explorer, Object Views, Vertex (graph), Map, Ontology Manager, Foundry Rules, Machinery, Dynamic Scheduling, Financial Portfolio, and Census Example
-
-- **Creating New Applications**: 
-  - Use the application template: `./scripts/create-app.sh my-app-name "Display Name" "Description"`
-  - See `ui-framework/APPLICATION_GUIDE.md` for detailed documentation
-  - See `ui-framework/APPLICATIONS.md` for examples of different application patterns
-
-#### Quick Start for UI Development
-
-**Using Makefile (Recommended):**
-```bash
-# Run backend + frontend together
-make dev
-
-# Run specific app
-make object-explorer
-make vertex
-make map-app
+  actionTypes:
+    - id: "send_notification"
+      displayName: "Send Notification"
+      targetObjectType: "person"
+      parameters:
+        - id: "message"
+          type: "string"
+          required: true
 ```
 
-**Manual Setup:**
+See `config/example_ontology.yaml` and `examples/census/config/census_ontology.yaml` for complete real-world examples. Property types: `string`, `integer`, `double`, `boolean`, `date`, `geojson`, `json`.
+
+## GraphQL API
+
+The backend runs at `http://localhost:8080/graphql` with an interactive playground. The schema is generated from your ontology.
+
+**Core queries:**
+
+```graphql
+# Search objects with filters
+query {
+  searchObjects(
+    objectType: "person"
+    filters: [{ property: "age", operator: "greaterThan", value: "30" }]
+    limit: 10
+  ) {
+    objectId
+    title
+    properties
+  }
+}
+
+# Get a single object
+query {
+  getObject(objectType: "person", objectId: "p-123") {
+    objectId
+    title
+    properties
+  }
+}
+
+# Follow links between objects
+query {
+  getLinkedObjects(objectType: "person", objectId: "p-123", linkType: "person_works_at") {
+    objectId
+    title
+    properties
+  }
+}
+
+# Graph traversal
+query {
+  traverseGraph(
+    objectType: "person"
+    objectId: "p-123"
+    linkTypes: ["person_works_at", "org_has_location"]
+    maxHops: 3
+  ) {
+    objectIds
+    count
+  }
+}
+
+# Aggregate
+query {
+  aggregate(
+    objectType: "person"
+    aggregations: [{ property: "age", operation: "avg" }]
+  ) {
+    rows
+    total
+  }
+}
+```
+
+**Mutations:**
+
+```graphql
+mutation { createObject(objectType: "person", properties: {name: "Alice", age: 30}) { objectId } }
+mutation { updateObject(objectType: "person", objectId: "p-123", properties: {age: 31}) { objectId } }
+mutation { createLink(linkType: "person_works_at", sourceObjectType: "person", sourceObjectId: "p-123", targetObjectType: "organization", targetObjectId: "org-456", properties: {}) { linkId } }
+```
+
+**Filter operators:** `equals`, `contains`, `greaterThan`, `lessThan`, `in`, `between`
+
+## Architecture
+
+```
+UI Apps (React/TypeScript/Vite)
+          │ GraphQL over HTTP
+          ▼
+GraphQL API — Rust/Axum (rust-core/graphql-api)
+          │
+    ┌─────┴──────────────────────┐
+    │                            │
+Ontology Engine            Indexing Service
+(rust-core/ontology-engine) (rust-core/indexing)
+    │                            │
+    │                   ┌────────┼────────┐
+    │                   ▼        ▼        ▼
+    │             Elasticsearch Dgraph  Parquet
+    │             (search)    (graph)  (analytics)
+    │
+Security (OLS) ─ rust-core/security
+Versioning     ─ rust-core/versioning  (time-travel queries)
+Writeback      ─ rust-core/writeback   (user edits overlay source data)
+Compiler       ─ rust-core/ontology-compiler
+
+Python Pipeline (python-pipeline/)
+  hydration/ ─ adapters for SQL, CSV, API, Kafka → pushes to Indexing Service
+```
+
+The **ontology engine** is the core — it defines `ObjectType`, `LinkType`, `ActionType`, `Interface`, `Function`, and computed/derived properties. All other components depend on it.
+
+The **writeback queue** stores user edits in PostgreSQL separately from source data. When you query an object, edits are merged in. Source data is never modified.
+
+**Versioning** uses event sourcing: every change is an append-only event, enabling time-travel queries (`temporalQuery`).
+
+**OLS (Object Level Security)** evaluates per-object access rules inside GraphQL resolvers before returning data.
+
+See [`docs/architecture.md`](docs/architecture.md) for a full deep-dive.
+
+## Frontend Applications
+
+The `ui-framework/` directory is an npm workspace. `packages/` contains shared React component libraries; `apps/` contains runnable applications that consume them.
+
+### Shared packages
+
+| Package | Contents |
+|---|---|
+| `@ontology/core` | `OntologyProvider`, `useOntology`, `ObjectBrowser`, `ObjectSearch`, `PropertyEditor` |
+| `@ontology/forms` | `DynamicForm`, `FilterBuilder` |
+| `@ontology/graph` | `GraphVisualization` |
+| `@ontology/map` | `MapView`, `TimeSlider` |
+
+Every app wraps its root in `<OntologyProvider client={apolloClient}>` to get access to the GraphQL client via `useOntology()`.
+
+### Available apps
+
+| App | Makefile target | Default port | Description |
+|---|---|---|---|
+| Object Explorer | `make object-explorer` | 3000 | Browse and search all object types |
+| Census Example | `make census-example` | 3005 | Geospatial + temporal census data demo |
+| Function Executor | `make function-executor` | 5180 | Discover and execute ontology Actions |
+| Interface Explorer | `make interface-explorer` | 5181 | Browse Object Interfaces |
+| Ontology Viewer | `make ontology-viewer` | 5182 | Visual schema browser |
+| Model Manager | *(no make target)* | 5185 | AI/ML model registry, bind models to properties |
+| Vertex | `make vertex` | 3002 | Graph traversal visualization |
+| Map | `make map-app` | 3003 | GeoJSON map visualization |
+| Platform | `make platform` | 5200 | Unified workstation (all apps in one) |
+
+### Creating a new app
+
 ```bash
-# Navigate to UI framework
-cd ui-framework
-
-# Install dependencies
-npm install
-
-# Run an example app
-npm run dev --workspace=census-example
-
-# Or create a new app
 ./scripts/create-app.sh my-app "My App" "Description"
-cd apps/my-app
+cd ui-framework/apps/my-app
 npm install
 npm run dev
 ```
 
-## Making It More Palantir-Like
+The generated app is pre-wired with `OntologyProvider`, Tailwind CSS, and Apollo Client pointing at `VITE_GRAPHQL_URL` (defaults to `http://localhost:8080`). See [`docs/ui-application-guide.md`](docs/ui-application-guide.md) for component API docs and patterns.
 
-The system already implements many Palantir Foundry features in the backend. To make it more Palantir-like:
+## Development
 
-1. **Quick Start:** See `QUICK_START_PALANTIR.md` for immediate next steps
-2. **Detailed Guide:** See `HOW_TO_MAKE_MORE_PALANTIR_LIKE.md` for comprehensive improvements
-3. **Roadmap:** See `PALANTIR_ROADMAP.md` for prioritized implementation plan
-4. **Feature Status:** See `PALANTIR_FOUNDRY_FEATURES.md` for what's implemented vs. missing
+```bash
+# Build
+make build              # build everything
+make build-backend      # Rust release build only
+make build-frontend     # all frontend apps
 
-**Key Priorities:**
-- Expose Functions and Interfaces in UI (backend already implemented)
-- Enhance property display with metadata (units, formats, descriptions)
-- Create data table component with Palantir-like features
-- Implement sharing rules (beyond basic OLS)
+# Test
+make test                               # all tests
+cd rust-core && cargo test --workspace  # Rust unit tests only
+cd rust-core && cargo test -p indexing  # single crate
+
+# Integration tests (require Docker services running)
+make services-up
+cd rust-core && cargo test --package indexing --test store_test -- --ignored
+
+# Stop everything
+make stop   # graceful
+make kill   # force
+```
+
+## Example: Census Dataset
+
+The census example (`examples/census/`) demonstrates the full system with real data:
+
+```bash
+# Generate sample data
+python3 examples/census/scripts/load_sample_data.py
+
+# Start with census ontology
+make dev ONTOLOGY_PATH=examples/census/config/census_ontology.yaml
+make census-example
+```
+
+This loads census tracts, counties, PUMAs, households, and persons with GeoJSON geometries. The census-example app shows choropleth maps, time-slider queries (1990/2000/2010/2020 vintages), graph traversal (Tract → PUMA → Household → Person), cohort building, and crosswalk boundary normalization.
 
 ## License
 
 MIT
-
-
-

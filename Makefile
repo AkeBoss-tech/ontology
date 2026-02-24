@@ -62,6 +62,7 @@ help: ## Show this help message
 	@echo "  - interface-explorer (NEW)"
 	@echo "  - ontology-viewer (NEW)"
 	@echo "  - model-manager (NEW)"
+	@echo "  - platform (UNIFIED WORKSTATION)"
 	@echo ""
 	@echo "$(GREEN)Build:$(NC)"
 	@echo "  make build            Build both backend and frontend"
@@ -273,7 +274,7 @@ interface-explorer: dev ## Run interface-explorer app with backend
 ontology-viewer: APP_NAME=ontology-viewer FRONTEND_PORT=5182
 ontology-viewer: dev ## Run ontology-viewer app with backend
 
-model-manager: APP_NAME=model-manager FRONTEND_PORT=5185
-model-manager: dev ## Run model-manager app with backend
+platform: APP_NAME=platform FRONTEND_PORT=5200
+platform: dev ## Run unified platform app
 
-.PHONY: help install install-backend install-frontend services-up services-down services-logs services-status backend frontend dev start build build-backend build-frontend clean stop kill test object-explorer object-views vertex map-app financial-portfolio census-example function-executor interface-explorer ontology-viewer model-manager
+.PHONY: help install install-backend install-frontend services-up services-down services-logs services-status backend frontend dev start build build-backend build-frontend clean stop kill test object-explorer object-views vertex map-app financial-portfolio census-example function-executor interface-explorer ontology-viewer model-manager platform
