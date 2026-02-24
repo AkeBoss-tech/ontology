@@ -188,7 +188,8 @@ export default function EnhancedPersonSearch() {
               <div className="text-sm space-y-1">
                 {(() => {
                   try {
-                    const rows = JSON.parse(aggData.aggregateObjects.rows);
+                    const rawRows = aggData.aggregateObjects.rows;
+                    const rows = typeof rawRows === 'string' ? JSON.parse(rawRows) : Array.isArray(rawRows) ? rawRows : [rawRows];
                     return rows.map((row: any, idx: number) => (
                       <div key={idx} className="text-gray-600">
                         {Object.entries(row).map(([key, value]) => (

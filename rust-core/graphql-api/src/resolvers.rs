@@ -393,40 +393,86 @@ impl QueryRoot {
         as_of_date: Option<String>, // ISO 8601 datetime string
     ) -> FieldResult<Vec<ObjectResult>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
-        let versioning = ctx.data::<Arc<time_query::TimeQuery>>()?;
-        let hydrator = ctx.data::<ObjectHydrator>()?;
-        
+
         let object_type_def = ontology.get_object_type(&object_type)
             .ok_or_else(|| async_graphql::Error::new("Object type not found"))?;
-        
-        let historical_objects = if let Some(as_of_str) = as_of_date {
-            // Parse as_of_date
-            let as_of = chrono::DateTime::parse_from_rfc3339(&as_of_str)
-                .map_err(|e| async_graphql::Error::new(format!("Invalid date format: {}", e)))?
-                .with_timezone(&chrono::Utc);
-            
-            versioning.query_as_of_date(&object_type, as_of, year)
-        } else if let (Some(start), Some(end)) = (year_range_start, year_range_end) {
-            versioning.query_by_year_range(&object_type, start, end, None)
-        } else if let Some(y) = year {
-            versioning.query_by_year(&object_type, y, None)
-        } else {
+
+        // Validate at least one filter provided
+        if year.is_none() && year_range_start.is_none() && as_of_date.is_none() {
             return Err(async_graphql::Error::new(
                 "Must provide either year, year_range_start/year_range_end, or as_of_date"
             ));
+        }
+
+        // Try in-memory store first — filter by the `year` property
+        let data_store = ctx.data::<Arc<tokio::sync::RwLock<HashMap<String, Vec<Value>>>>>();
+        if let Ok(store) = data_store {
+            let store_read = store.read().await;
+            if let Some(objects) = store_read.get(&object_type) {
+                let filtered: Vec<&Value> = objects.iter().filter(|obj| {
+                    let obj_year = obj.get("year").and_then(|v| v.as_i64());
+                    match obj_year {
+                        None => false,
+                        Some(y) => {
+                            if let Some(target) = year {
+                                y == target
+                            } else if let (Some(start), Some(end)) = (year_range_start, year_range_end) {
+                                y >= start && y <= end
+                            } else {
+                                // as_of_date: all years up to now (EventLog is empty anyway)
+                                true
+                            }
+                        }
+                    }
+                }).collect();
+
+                let results = filtered.iter().map(|obj| {
+                    let object_id = obj.get(&object_type_def.primary_key)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let title = object_type_def.title_key
+                        .as_ref()
+                        .and_then(|key| obj.get(key))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| object_id.clone());
+                    ObjectResult {
+                        object_type: object_type.clone(),
+                        object_id,
+                        title,
+                        properties: Json((*obj).clone()),
+                    }
+                }).collect();
+
+                return Ok(results);
+            }
+        }
+
+        // Fallback to versioning service (EventLog-backed)
+        let versioning = ctx.data::<Arc<time_query::TimeQuery>>()?;
+        let hydrator = ctx.data::<ObjectHydrator>()?;
+
+        let historical_objects = if let Some(as_of_str) = as_of_date {
+            let as_of = chrono::DateTime::parse_from_rfc3339(&as_of_str)
+                .map_err(|e| async_graphql::Error::new(format!("Invalid date format: {}", e)))?
+                .with_timezone(&chrono::Utc);
+            versioning.query_as_of_date(&object_type, as_of, year)
+        } else if let (Some(start), Some(end)) = (year_range_start, year_range_end) {
+            versioning.query_by_year_range(&object_type, start, end, None)
+        } else {
+            versioning.query_by_year(&object_type, year.unwrap(), None)
         };
-        
-        // Convert historical objects to hydrated objects
+
         let mut results = Vec::new();
         for historical in historical_objects {
-            // Create a temporary IndexedObject from HistoricalObject
             let mut indexed = indexing::store::IndexedObject::new(
                 historical.object_type.clone(),
                 historical.object_id.clone(),
                 historical.properties.clone(),
             );
             indexed.indexed_at = historical.reconstructed_at;
-            
+
             if let Ok(hydrated) = hydrator.hydrate_from_indexed(&indexed, object_type_def) {
                 let properties_json: Value = serde_json::to_value(&hydrated.properties)
                     .unwrap_or_else(|_| serde_json::json!({}));
@@ -438,7 +484,7 @@ impl QueryRoot {
                 });
             }
         }
-        
+
         Ok(results)
     }
     
@@ -545,7 +591,7 @@ impl QueryRoot {
     }
     
     /// Aggregate query - perform aggregations on objects
-    async fn aggregate(
+    async fn aggregate_objects(
         &self,
         ctx: &Context<'_>,
         object_type: String,

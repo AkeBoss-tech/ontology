@@ -24,14 +24,8 @@ ontology:
           type: "integer"
         - id: "median_household_income"
           type: "double"
-        - id: "median_rent"
-          type: "double"
         - id: "geoshape"
           type: "geojson"
-        - id: "centroid_lat"
-          type: "double"
-        - id: "centroid_lon"
-          type: "double"
       titleKey: "name"
       backingDatasource: "parquet://census_data/states"
 
@@ -58,14 +52,8 @@ ontology:
           type: "integer"
         - id: "median_household_income"
           type: "double"
-        - id: "median_rent"
-          type: "double"
         - id: "geoshape"
-          type: "geojson"  # GeoJSON polygon
-        - id: "centroid_lat"
-          type: "double"
-        - id: "centroid_lon"
-          type: "double"
+          type: "geojson"
       titleKey: "geoid_year"
       backingDatasource: "parquet://census_data/tracts"
 
@@ -85,12 +73,16 @@ ontology:
         - id: "name"
           type: "string"
           required: true
-        - id: "state_code"
+        - id: "state_fips"
           type: "string"
-        - id: "unemployment_rate"
+        - id: "county_fips"
+          type: "string"
+        - id: "total_population"
+          type: "integer"
+        - id: "median_household_income"
           type: "double"
         - id: "geoshape"
-          type: "string"
+          type: "geojson"
       titleKey: "name"
       backingDatasource: "parquet://census_data/counties"
 
@@ -147,26 +139,24 @@ ontology:
     # PUMS Microdata Layer
     - id: "pums_household"
       displayName: "PUMS Household"
-      primaryKey: "serialno_year"
+      primaryKey: "household_id"
       properties:
-        - id: "serialno_year"
+        - id: "household_id"
           type: "string"
           required: true
-        - id: "serialno"
+        - id: "tract_geoid"
           type: "string"
           required: true
         - id: "year"
           type: "integer"
           required: true
+        - id: "household_type"
+          type: "string"
+        - id: "household_size"
+          type: "integer"
         - id: "household_income"
           type: "double"
-        - id: "num_rooms"
-          type: "integer"
-        - id: "original_weight"
-          type: "double"
-        - id: "tenure"
-          type: "string"  # Owned/Rented
-      titleKey: "serialno_year"
+      titleKey: "household_id"
       backingDatasource: "parquet://census_data/pums_households"
 
     - id: "pums_person"
@@ -177,6 +167,9 @@ ontology:
           type: "string"
           required: true
         - id: "person_id"
+          type: "string"
+          required: true
+        - id: "household_id"
           type: "string"
           required: true
         - id: "year"
@@ -194,6 +187,8 @@ ontology:
           type: "string"
         - id: "wages"
           type: "double"
+        - id: "hours_worked"
+          type: "integer"
         - id: "education_attainment"
           type: "string"
       titleKey: "person_id_year"

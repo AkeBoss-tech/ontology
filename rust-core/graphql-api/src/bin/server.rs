@@ -46,31 +46,47 @@ async fn load_data_from_files() {
         ("states.json", "state_vintage"),
         ("counties.json", "county_vintage"),
         ("tracts.json", "census_tract_vintage"),
+        ("pumas.json", "puma_vintage"),
+        ("crosswalks.json", "boundary_crosswalk"),
         ("households.json", "pums_household"),
         ("persons.json", "pums_person"),
     ];
-    
+
     let mut store = DATA_STORE.write().await;
     let mut total_loaded = 0;
-    
+
     for (filename, object_type) in files {
         let file_path = data_dir.join(filename);
         if file_path.exists() {
             match fs::read_to_string(&file_path) {
                 Ok(content) => {
                     match serde_json::from_str::<Vec<Value>>(&content) {
-                        Ok(objects) => {
+                        Ok(mut objects) => {
+                            // Inject computed primary keys where the data doesn't include them
+                            if object_type == "pums_person" {
+                                for obj in &mut objects {
+                                    if let Value::Object(map) = obj {
+                                        if !map.contains_key("person_id_year") {
+                                            let person_id = map.get("person_id")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("unknown");
+                                            let year = map.get("year")
+                                                .and_then(|v| v.as_i64())
+                                                .unwrap_or(0);
+                                            map.insert(
+                                                "person_id_year".to_string(),
+                                                Value::String(format!("{}_{}", person_id, year)),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+
                             let key = object_type.to_string();
                             let count = objects.len();
                             store.insert(key.clone(), objects);
                             total_loaded += count;
-                            println!("✓ Loaded {} {} objects from {} (key: {})", count, object_type, filename, key);
-                            // Debug: Show sample object structure
-                            if let Some(sample) = store.get(&key).and_then(|v| v.first()) {
-                                if let Value::Object(map) = sample {
-                                    println!("  Sample keys: {:?}", map.keys().take(5).collect::<Vec<_>>());
-                                }
-                            }
+                            println!("✓ Loaded {} {} objects from {}", count, object_type, filename);
                         }
                         Err(e) => {
                             println!("⚠ Failed to parse {}: {}", filename, e);
@@ -85,7 +101,7 @@ async fn load_data_from_files() {
             println!("⚠ File not found: {}", file_path.display());
         }
     }
-    
+
     println!("✓ Data loading complete: {} total objects loaded", total_loaded);
     println!("  Store keys: {:?}", store.keys().collect::<Vec<_>>());
 }
