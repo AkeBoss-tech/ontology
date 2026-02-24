@@ -11,3 +11,6 @@ clap = { version = "4.4", features = ["derive"] }
 anyhow = "1.0"
 oxigraph = "0.3"
 ontology-engine = { path = "../ontology-engine" }
+
+[lints]
+workspace = true

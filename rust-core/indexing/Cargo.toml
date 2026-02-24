@@ -29,3 +29,6 @@ name = "store_test"
 path = "tests/store_test.rs"
 
 
+
+[lints]
+workspace = true

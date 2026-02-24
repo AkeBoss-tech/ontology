@@ -1,15 +1,17 @@
-use async_graphql::{Context, Object, FieldResult, InputObject, SimpleObject, Json};
-use indexing::store::{SearchStore, GraphStore, SearchQuery, Filter, CentralityMetric, CommunityAlgorithm};
-use indexing::{DataQualityMetrics, DataLineage, ObjectUsageMetrics};
-use indexing::hydration::ObjectHydrator;
-use ontology_engine::{Ontology, FunctionExecutor, InterfaceValidator, PropertyValue};
-use versioning::time_query;
-use std::sync::Arc;
-use std::collections::HashMap;
-use serde_json::Value;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
+use async_graphql::{Context, FieldResult, InputObject, Json, Object, SimpleObject};
 use chrono::{DateTime, Utc};
+use indexing::hydration::ObjectHydrator;
+use indexing::store::{
+    CentralityMetric, CommunityAlgorithm, Filter, GraphStore, SearchQuery, SearchStore,
+};
+use indexing::{DataLineage, DataQualityMetrics, ObjectUsageMetrics};
+use ontology_engine::{FunctionExecutor, InterfaceValidator, Ontology, PropertyValue};
+use serde_json::Value;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+use versioning::time_query;
 
 /// Root query type for GraphQL API
 #[derive(Default)]
@@ -30,7 +32,7 @@ impl QueryRoot {
         let ontology = ctx.data::<Arc<Ontology>>()?;
         let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
         let hydrator = ctx.data::<ObjectHydrator>()?;
-        
+
         // Build filters first
         let mut store_filters = Vec::new();
         if let Some(filter_inputs) = filters {
@@ -38,42 +40,44 @@ impl QueryRoot {
                 store_filters.push(convert_filter_input(filter_input)?);
             }
         }
-        
+
         // Try to get data from in-memory store first
         let data_store = ctx.data::<Arc<tokio::sync::RwLock<HashMap<String, Vec<Value>>>>>();
-        
+
         if let Ok(store) = data_store {
             let store_read = store.read().await;
             eprintln!("DEBUG: Looking for object_type: {}", object_type);
-            eprintln!("DEBUG: Available keys in store: {:?}", store_read.keys().collect::<Vec<_>>());
+            eprintln!(
+                "DEBUG: Available keys in store: {:?}",
+                store_read.keys().collect::<Vec<_>>()
+            );
             if let Some(objects) = store_read.get(&object_type) {
                 eprintln!("DEBUG: Found {} objects for {}", objects.len(), object_type);
                 // Get object type definition for metadata
-                let object_type_def = ontology.get_object_type(&object_type)
-                    .ok_or_else(|| async_graphql::Error::new("Object type not found in ontology"))?;
-                
+                let object_type_def = ontology.get_object_type(&object_type).ok_or_else(|| {
+                    async_graphql::Error::new("Object type not found in ontology")
+                })?;
+
                 // Filter objects based on filters
                 let mut filtered: Vec<&Value> = objects.iter().collect();
-                
+
                 // Apply filters
                 for filter in &store_filters {
                     filtered.retain(|obj| {
                         if let Some(prop_value) = obj.get(&filter.property) {
                             match &filter.operator {
-                                indexing::store::FilterOperator::Equals => {
-                                    match filter.value {
-                                        ontology_engine::PropertyValue::String(ref s) => {
-                                            prop_value.as_str().map_or(false, |v| v == s)
-                                        }
-                                        ontology_engine::PropertyValue::Integer(i) => {
-                                            prop_value.as_i64().map_or(false, |v| v == i)
-                                        }
-                                        ontology_engine::PropertyValue::Double(d) => {
-                                            prop_value.as_f64().map_or(false, |v| (v - d).abs() < 0.0001)
-                                        }
-                                        _ => false,
+                                indexing::store::FilterOperator::Equals => match filter.value {
+                                    ontology_engine::PropertyValue::String(ref s) => {
+                                        prop_value.as_str().map_or(false, |v| v == s)
                                     }
-                                }
+                                    ontology_engine::PropertyValue::Integer(i) => {
+                                        prop_value.as_i64().map_or(false, |v| v == i)
+                                    }
+                                    ontology_engine::PropertyValue::Double(d) => prop_value
+                                        .as_f64()
+                                        .map_or(false, |v| (v - d).abs() < 0.0001),
+                                    _ => false,
+                                },
                                 indexing::store::FilterOperator::GreaterThan => {
                                     match filter.value {
                                         ontology_engine::PropertyValue::Integer(i) => {
@@ -85,17 +89,15 @@ impl QueryRoot {
                                         _ => false,
                                     }
                                 }
-                                indexing::store::FilterOperator::LessThan => {
-                                    match filter.value {
-                                        ontology_engine::PropertyValue::Integer(i) => {
-                                            prop_value.as_i64().map_or(false, |v| v < i)
-                                        }
-                                        ontology_engine::PropertyValue::Double(d) => {
-                                            prop_value.as_f64().map_or(false, |v| v < d)
-                                        }
-                                        _ => false,
+                                indexing::store::FilterOperator::LessThan => match filter.value {
+                                    ontology_engine::PropertyValue::Integer(i) => {
+                                        prop_value.as_i64().map_or(false, |v| v < i)
                                     }
-                                }
+                                    ontology_engine::PropertyValue::Double(d) => {
+                                        prop_value.as_f64().map_or(false, |v| v < d)
+                                    }
+                                    _ => false,
+                                },
                                 _ => true, // For other operators, keep for now
                             }
                         } else {
@@ -103,76 +105,98 @@ impl QueryRoot {
                         }
                     });
                 }
-                
+
                 // Apply pagination
                 let start = offset.unwrap_or(0);
                 let end = limit.map(|l| start + l).unwrap_or(filtered.len());
-                let paginated: Vec<&Value> = filtered.into_iter().skip(start).take(end - start).collect();
-                
+                let paginated: Vec<&Value> =
+                    filtered.into_iter().skip(start).take(end - start).collect();
+
                 // Convert to ObjectResult
-                let results: Vec<ObjectResult> = paginated.iter().map(|obj| {
-                    let object_id = obj.get(&object_type_def.primary_key)
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    
-                    let title = object_type_def.title_key
-                        .as_ref()
-                        .and_then(|key| obj.get(key))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| object_id.clone());
-                    
-                    ObjectResult {
-                        object_type: object_type.clone(),
-                        object_id,
-                        title,
-                        properties: Json((*obj).clone()),
-                    }
-                }).collect();
-                
-                eprintln!("DEBUG: Returning {} results from in-memory store", results.len());
+                let results: Vec<ObjectResult> = paginated
+                    .iter()
+                    .map(|obj| {
+                        let object_id = obj
+                            .get(&object_type_def.primary_key)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+
+                        let title = object_type_def
+                            .title_key
+                            .as_ref()
+                            .and_then(|key| obj.get(key))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| object_id.clone());
+
+                        ObjectResult {
+                            object_type: object_type.clone(),
+                            object_id,
+                            title,
+                            properties: Json((*obj).clone()),
+                        }
+                    })
+                    .collect();
+
+                eprintln!(
+                    "DEBUG: Returning {} results from in-memory store",
+                    results.len()
+                );
                 return Ok(results);
             } else {
                 eprintln!("DEBUG: No objects found for object_type: {}", object_type);
-                eprintln!("DEBUG: Available keys: {:?}", store_read.keys().collect::<Vec<_>>());
+                eprintln!(
+                    "DEBUG: Available keys: {:?}",
+                    store_read.keys().collect::<Vec<_>>()
+                );
             }
         } else {
-            eprintln!("DEBUG: Failed to get data_store from context. Error: {:?}", data_store);
+            eprintln!(
+                "DEBUG: Failed to get data_store from context. Error: {:?}",
+                data_store
+            );
         }
-        
+
         // Fallback to search store - get object type definition
-        let object_type_def = ontology.get_object_type(&object_type)
+        let object_type_def = ontology
+            .get_object_type(&object_type)
             .ok_or_else(|| async_graphql::Error::new("Object type not found"))?;
-        
+
         let query = SearchQuery {
             filters: store_filters,
             sort: None,
             limit,
             offset,
         };
-        
+
         // Execute search
-        let indexed_objects = search_store.search(&object_type, &query).await
+        let indexed_objects = search_store
+            .search(&object_type, &query)
+            .await
             .map_err(|e| async_graphql::Error::new(format!("Search error: {}", e)))?;
-        
+
         // Hydrate objects
-        let hydrated = hydrator.hydrate_batch(&indexed_objects, object_type_def)
+        let hydrated = hydrator
+            .hydrate_batch(&indexed_objects, object_type_def)
             .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
-        
+
         // Convert to GraphQL results
-        Ok(hydrated.into_iter().map(|h| {
-            let properties_json: Value = serde_json::to_value(&h.properties)
-                .unwrap_or_else(|_| serde_json::json!({}));
-            ObjectResult {
-                object_type: h.object_type,
-                object_id: h.object_id,
-                title: h.title,
-                properties: Json(properties_json),
-            }
-        }).collect())
+        Ok(hydrated
+            .into_iter()
+            .map(|h| {
+                let properties_json: Value =
+                    serde_json::to_value(&h.properties).unwrap_or_else(|_| serde_json::json!({}));
+                ObjectResult {
+                    object_type: h.object_type,
+                    object_id: h.object_id,
+                    title: h.title,
+                    properties: Json(properties_json),
+                }
+            })
+            .collect())
     }
-    
+
     /// Get a specific object by ID
     async fn get_object(
         &self,
@@ -182,7 +206,8 @@ impl QueryRoot {
     ) -> FieldResult<Option<ObjectResult>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
 
-        let object_type_def = ontology.get_object_type(&object_type)
+        let object_type_def = ontology
+            .get_object_type(&object_type)
             .ok_or_else(|| async_graphql::Error::new("Object type not found"))?;
 
         // Try in-memory store first
@@ -200,7 +225,8 @@ impl QueryRoot {
                 });
 
                 if let Some(obj) = found {
-                    let title = object_type_def.title_key
+                    let title = object_type_def
+                        .title_key
                         .as_ref()
                         .and_then(|key| obj.get(key))
                         .and_then(|v| v.as_str())
@@ -222,11 +248,14 @@ impl QueryRoot {
         let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
         let hydrator = ctx.data::<ObjectHydrator>()?;
 
-        let indexed = search_store.get_object(&object_type, &object_id).await
+        let indexed = search_store
+            .get_object(&object_type, &object_id)
+            .await
             .map_err(|e| async_graphql::Error::new(format!("Get error: {}", e)))?;
 
         if let Some(indexed) = indexed {
-            let hydrated = hydrator.hydrate_from_indexed(&indexed, object_type_def)
+            let hydrated = hydrator
+                .hydrate_from_indexed(&indexed, object_type_def)
                 .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
 
             let properties_json: Value = serde_json::to_value(&hydrated.properties)
@@ -241,7 +270,7 @@ impl QueryRoot {
             Ok(None)
         }
     }
-    
+
     /// Get linked objects via a specific link type
     async fn get_linked_objects(
         &self,
@@ -254,31 +283,39 @@ impl QueryRoot {
         let graph_store = ctx.data::<Arc<dyn GraphStore>>()?;
         let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
         let hydrator = ctx.data::<ObjectHydrator>()?;
-        
+
         // Validate link type
-        let link_type_def = ontology.get_link_type(&link_type)
+        let link_type_def = ontology
+            .get_link_type(&link_type)
             .ok_or_else(|| async_graphql::Error::new("Link type not found"))?;
-        
+
         // Determine target object type
         let target_type = if link_type_def.source == object_type {
             &link_type_def.target
         } else if link_type_def.target == object_type {
             &link_type_def.source
         } else {
-            return Err(async_graphql::Error::new("Link type does not connect to this object type"));
+            return Err(async_graphql::Error::new(
+                "Link type does not connect to this object type",
+            ));
         };
-        
-        let target_type_def = ontology.get_object_type(target_type)
+
+        let target_type_def = ontology
+            .get_object_type(target_type)
             .ok_or_else(|| async_graphql::Error::new("Target object type not found"))?;
-        
+
         // Get linked object IDs from graph store
-        let linked_ids = graph_store.get_connected_objects(&object_id, &link_type).await
+        let linked_ids = graph_store
+            .get_connected_objects(&object_id, &link_type)
+            .await
             .map_err(|e| async_graphql::Error::new(format!("Graph query error: {}", e)))?;
-        
+
         // Fetch and hydrate linked objects
         let mut results = Vec::new();
         for id in linked_ids {
-            if let Some(indexed) = search_store.get_object(target_type, &id).await
+            if let Some(indexed) = search_store
+                .get_object(target_type, &id)
+                .await
                 .map_err(|e| async_graphql::Error::new(format!("Get error: {}", e)))?
             {
                 if let Ok(hydrated) = hydrator.hydrate_from_indexed(&indexed, target_type_def) {
@@ -293,10 +330,10 @@ impl QueryRoot {
                 }
             }
         }
-        
+
         Ok(results)
     }
-    
+
     /// Spatial query - search objects by geospatial criteria
     async fn spatial_query(
         &self,
@@ -304,27 +341,29 @@ impl QueryRoot {
         object_type: String,
         property: String,
         operator: String,
-        geometry: String, // GeoJSON string
+        geometry: String,      // GeoJSON string
         distance: Option<f64>, // For WithinDistance operator
     ) -> FieldResult<Vec<ObjectResult>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
         let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
         let hydrator = ctx.data::<ObjectHydrator>()?;
-        
-        let object_type_def = ontology.get_object_type(&object_type)
+
+        let object_type_def = ontology
+            .get_object_type(&object_type)
             .ok_or_else(|| async_graphql::Error::new("Object type not found"))?;
-        
+
         // Validate that the property exists and is GeoJSON type
-        let prop = object_type_def.get_property(&property)
-            .ok_or_else(|| async_graphql::Error::new(format!("Property '{}' not found", property)))?;
-        
+        let prop = object_type_def.get_property(&property).ok_or_else(|| {
+            async_graphql::Error::new(format!("Property '{}' not found", property))
+        })?;
+
         if prop.property_type != ontology_engine::PropertyType::GeoJSON {
             return Err(async_graphql::Error::new(format!(
                 "Property '{}' is not a GeoJSON type",
                 property
             )));
         }
-        
+
         // Parse operator
         let filter_operator = match operator.to_lowercase().as_str() {
             "contains" => indexing::store::FilterOperator::ContainsGeometry,
@@ -336,7 +375,7 @@ impl QueryRoot {
                 operator
             ))),
         };
-        
+
         // Validate GeoJSON
         let geometry_value = ontology_engine::PropertyValue::GeoJSON(geometry.clone());
         if let Err(e) = prop.validate_value(&geometry_value) {
@@ -345,7 +384,7 @@ impl QueryRoot {
                 e
             )));
         }
-        
+
         // Build filter
         let filter = Filter {
             property,
@@ -353,35 +392,41 @@ impl QueryRoot {
             value: geometry_value,
             distance,
         };
-        
+
         let query = SearchQuery {
             filters: vec![filter],
             sort: None,
             limit: None,
             offset: None,
         };
-        
+
         // Execute search
-        let indexed_objects = search_store.search(&object_type, &query).await
+        let indexed_objects = search_store
+            .search(&object_type, &query)
+            .await
             .map_err(|e| async_graphql::Error::new(format!("Spatial search error: {}", e)))?;
-        
+
         // Hydrate objects
-        let hydrated = hydrator.hydrate_batch(&indexed_objects, object_type_def)
+        let hydrated = hydrator
+            .hydrate_batch(&indexed_objects, object_type_def)
             .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
-        
+
         // Convert to GraphQL results
-        Ok(hydrated.into_iter().map(|h| {
-            let properties_json: Value = serde_json::to_value(&h.properties)
-                .unwrap_or_else(|_| serde_json::json!({}));
-            ObjectResult {
-                object_type: h.object_type,
-                object_id: h.object_id,
-                title: h.title,
-                properties: Json(properties_json),
-            }
-        }).collect())
+        Ok(hydrated
+            .into_iter()
+            .map(|h| {
+                let properties_json: Value =
+                    serde_json::to_value(&h.properties).unwrap_or_else(|_| serde_json::json!({}));
+                ObjectResult {
+                    object_type: h.object_type,
+                    object_id: h.object_id,
+                    title: h.title,
+                    properties: Json(properties_json),
+                }
+            })
+            .collect())
     }
-    
+
     /// Temporal query - query objects by year/vintage
     async fn temporal_query(
         &self,
@@ -394,13 +439,14 @@ impl QueryRoot {
     ) -> FieldResult<Vec<ObjectResult>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
 
-        let object_type_def = ontology.get_object_type(&object_type)
+        let object_type_def = ontology
+            .get_object_type(&object_type)
             .ok_or_else(|| async_graphql::Error::new("Object type not found"))?;
 
         // Validate at least one filter provided
         if year.is_none() && year_range_start.is_none() && as_of_date.is_none() {
             return Err(async_graphql::Error::new(
-                "Must provide either year, year_range_start/year_range_end, or as_of_date"
+                "Must provide either year, year_range_start/year_range_end, or as_of_date",
             ));
         }
 
@@ -409,41 +455,51 @@ impl QueryRoot {
         if let Ok(store) = data_store {
             let store_read = store.read().await;
             if let Some(objects) = store_read.get(&object_type) {
-                let filtered: Vec<&Value> = objects.iter().filter(|obj| {
-                    let obj_year = obj.get("year").and_then(|v| v.as_i64());
-                    match obj_year {
-                        None => false,
-                        Some(y) => {
-                            if let Some(target) = year {
-                                y == target
-                            } else if let (Some(start), Some(end)) = (year_range_start, year_range_end) {
-                                y >= start && y <= end
-                            } else {
-                                // as_of_date: all years up to now (EventLog is empty anyway)
-                                true
+                let filtered: Vec<&Value> = objects
+                    .iter()
+                    .filter(|obj| {
+                        let obj_year = obj.get("year").and_then(|v| v.as_i64());
+                        match obj_year {
+                            None => false,
+                            Some(y) => {
+                                if let Some(target) = year {
+                                    y == target
+                                } else if let (Some(start), Some(end)) =
+                                    (year_range_start, year_range_end)
+                                {
+                                    y >= start && y <= end
+                                } else {
+                                    // as_of_date: all years up to now (EventLog is empty anyway)
+                                    true
+                                }
                             }
                         }
-                    }
-                }).collect();
+                    })
+                    .collect();
 
-                let results = filtered.iter().map(|obj| {
-                    let object_id = obj.get(&object_type_def.primary_key)
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let title = object_type_def.title_key
-                        .as_ref()
-                        .and_then(|key| obj.get(key))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| object_id.clone());
-                    ObjectResult {
-                        object_type: object_type.clone(),
-                        object_id,
-                        title,
-                        properties: Json((*obj).clone()),
-                    }
-                }).collect();
+                let results = filtered
+                    .iter()
+                    .map(|obj| {
+                        let object_id = obj
+                            .get(&object_type_def.primary_key)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let title = object_type_def
+                            .title_key
+                            .as_ref()
+                            .and_then(|key| obj.get(key))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| object_id.clone());
+                        ObjectResult {
+                            object_type: object_type.clone(),
+                            object_id,
+                            title,
+                            properties: Json((*obj).clone()),
+                        }
+                    })
+                    .collect();
 
                 return Ok(results);
             }
@@ -487,7 +543,7 @@ impl QueryRoot {
 
         Ok(results)
     }
-    
+
     /// Get available years for an object type
     async fn get_available_years(
         &self,
@@ -496,7 +552,7 @@ impl QueryRoot {
     ) -> FieldResult<Vec<i64>> {
         // Try to get years from in-memory store first
         let data_store = ctx.data::<Arc<tokio::sync::RwLock<HashMap<String, Vec<Value>>>>>();
-        
+
         if let Ok(store) = data_store {
             let store_read = store.read().await;
             if let Some(objects) = store_read.get(&object_type) {
@@ -511,17 +567,17 @@ impl QueryRoot {
                 return Ok(years_vec);
             }
         }
-        
+
         // Fallback to versioning service
         let versioning = ctx.data::<Arc<time_query::TimeQuery>>();
         if let Ok(vq) = versioning {
             return Ok(vq.get_available_years(&object_type, None));
         }
-        
+
         // Default fallback
         Ok(vec![2010, 2020])
     }
-    
+
     /// Traverse graph with filters and aggregations
     async fn traverse_graph(
         &self,
@@ -537,7 +593,7 @@ impl QueryRoot {
         let graph_store = ctx.data::<Arc<dyn GraphStore>>()?;
         let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
         let hydrator = ctx.data::<ObjectHydrator>()?;
-        
+
         // If aggregation is requested, use aggregation traversal
         if let (Some(prop), Some(op)) = (aggregate_property, aggregate_operation) {
             let aggregation_op = match op.to_lowercase().as_str() {
@@ -546,50 +602,47 @@ impl QueryRoot {
                 "avg" => indexing::store::Aggregation::Avg(prop.clone()),
                 "min" => indexing::store::Aggregation::Min(prop.clone()),
                 "max" => indexing::store::Aggregation::Max(prop.clone()),
-                _ => return Err(async_graphql::Error::new(format!(
-                    "Invalid aggregation operation: {}. Valid: count, sum, avg, min, max",
-                    op
-                ))),
+                _ => {
+                    return Err(async_graphql::Error::new(format!(
+                        "Invalid aggregation operation: {}. Valid: count, sum, avg, min, max",
+                        op
+                    )))
+                }
             };
-            
+
             let aggregation = indexing::store::TraversalAggregation {
                 property: prop,
                 operation: aggregation_op,
                 object_filters: vec![],
             };
-            
-            let result = graph_store.traverse_with_aggregation(
-                &object_id,
-                &link_types,
-                max_hops,
-                &aggregation,
-            ).await
-            .map_err(|e| async_graphql::Error::new(format!("Traversal error: {}", e)))?;
-            
-            let agg_value_json: Value = serde_json::to_value(&result.value)
-                .unwrap_or_else(|_| serde_json::Value::Null);
+
+            let result = graph_store
+                .traverse_with_aggregation(&object_id, &link_types, max_hops, &aggregation)
+                .await
+                .map_err(|e| async_graphql::Error::new(format!("Traversal error: {}", e)))?;
+
+            let agg_value_json: Value =
+                serde_json::to_value(&result.value).unwrap_or_else(|_| serde_json::Value::Null);
             return Ok(TraversalResult {
                 object_ids: vec![],
                 aggregated_value: Some(Json(agg_value_json)),
                 count: Some(result.count),
             });
         }
-        
+
         // Regular traversal
-        let object_ids = graph_store.traverse(
-            &object_id,
-            &link_types,
-            max_hops,
-        ).await
-        .map_err(|e| async_graphql::Error::new(format!("Traversal error: {}", e)))?;
-        
+        let object_ids = graph_store
+            .traverse(&object_id, &link_types, max_hops)
+            .await
+            .map_err(|e| async_graphql::Error::new(format!("Traversal error: {}", e)))?;
+
         Ok(TraversalResult {
             object_ids: object_ids.clone(),
             aggregated_value: None,
             count: Some(object_ids.len()),
         })
     }
-    
+
     /// Aggregate query - perform aggregations on objects
     async fn aggregate_objects(
         &self,
@@ -601,10 +654,11 @@ impl QueryRoot {
     ) -> FieldResult<AggregationResult> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
         let columnar_store = ctx.data::<Arc<dyn indexing::store::ColumnarStore>>()?;
-        
-        let object_type_def = ontology.get_object_type(&object_type)
+
+        let object_type_def = ontology
+            .get_object_type(&object_type)
             .ok_or_else(|| async_graphql::Error::new("Object type not found"))?;
-        
+
         // Convert GraphQL aggregations to store aggregations
         let mut store_aggregations = Vec::new();
         for agg_input in aggregations {
@@ -615,15 +669,22 @@ impl QueryRoot {
                 "min" => indexing::store::Aggregation::Min(agg_input.property.clone()),
                 "max" => indexing::store::Aggregation::Max(agg_input.property.clone()),
                 "median" => indexing::store::Aggregation::Median(agg_input.property.clone()),
-                "stddev" | "std_dev" => indexing::store::Aggregation::StdDev(agg_input.property.clone()),
+                "stddev" | "std_dev" => {
+                    indexing::store::Aggregation::StdDev(agg_input.property.clone())
+                }
                 "variance" => indexing::store::Aggregation::Variance(agg_input.property.clone()),
-                "distinct_count" => indexing::store::Aggregation::DistinctCount(agg_input.property.clone()),
+                "distinct_count" => {
+                    indexing::store::Aggregation::DistinctCount(agg_input.property.clone())
+                }
                 _ => {
                     // Check for percentile format: "p50", "p95", etc.
                     if agg_input.operation.starts_with('p') && agg_input.operation.len() > 1 {
                         if let Ok(pct_val) = agg_input.operation[1..].parse::<u8>() {
                             let pct = pct_val as f64 / 100.0;
-                            indexing::store::Aggregation::Percentile(agg_input.property.clone(), pct)
+                            indexing::store::Aggregation::Percentile(
+                                agg_input.property.clone(),
+                                pct,
+                            )
                         } else {
                             return Err(async_graphql::Error::new(format!(
                                 "Invalid aggregation operation: {}. Valid: count, sum, avg, min, max, median, stddev, variance, distinct_count, p50, p95, etc.",
@@ -640,7 +701,7 @@ impl QueryRoot {
             };
             store_aggregations.push(agg);
         }
-        
+
         // Convert filters
         let mut store_filters = Vec::new();
         if let Some(filter_inputs) = filters {
@@ -648,7 +709,7 @@ impl QueryRoot {
                 store_filters.push(convert_filter_input(filter_input)?);
             }
         }
-        
+
         let group_by_cols = group_by.unwrap_or_default();
 
         // Try in-memory store before falling back to Parquet
@@ -657,31 +718,54 @@ impl QueryRoot {
             let store_read = store.read().await;
             if let Some(objects) = store_read.get(&object_type) {
                 // Apply filters
-                let filtered: Vec<&Value> = objects.iter().filter(|obj| {
-                    store_filters.iter().all(|filter| {
-                        obj.get(&filter.property).map_or(false, |prop_val| {
-                            match &filter.operator {
-                                indexing::store::FilterOperator::Equals => match &filter.value {
-                                    ontology_engine::PropertyValue::String(s) => prop_val.as_str().map_or(false, |v| v == s),
-                                    ontology_engine::PropertyValue::Integer(i) => prop_val.as_i64().map_or(false, |v| v == *i),
-                                    ontology_engine::PropertyValue::Double(d) => prop_val.as_f64().map_or(false, |v| (v - d).abs() < 0.0001),
-                                    _ => false,
-                                },
-                                indexing::store::FilterOperator::GreaterThan => match &filter.value {
-                                    ontology_engine::PropertyValue::Integer(i) => prop_val.as_i64().map_or(false, |v| v > *i),
-                                    ontology_engine::PropertyValue::Double(d) => prop_val.as_f64().map_or(false, |v| v > *d),
-                                    _ => false,
-                                },
-                                indexing::store::FilterOperator::LessThan => match &filter.value {
-                                    ontology_engine::PropertyValue::Integer(i) => prop_val.as_i64().map_or(false, |v| v < *i),
-                                    ontology_engine::PropertyValue::Double(d) => prop_val.as_f64().map_or(false, |v| v < *d),
-                                    _ => false,
-                                },
-                                _ => true,
-                            }
+                let filtered: Vec<&Value> = objects
+                    .iter()
+                    .filter(|obj| {
+                        store_filters.iter().all(|filter| {
+                            obj.get(&filter.property).map_or(false, |prop_val| {
+                                match &filter.operator {
+                                    indexing::store::FilterOperator::Equals => {
+                                        match &filter.value {
+                                            ontology_engine::PropertyValue::String(s) => {
+                                                prop_val.as_str().map_or(false, |v| v == s)
+                                            }
+                                            ontology_engine::PropertyValue::Integer(i) => {
+                                                prop_val.as_i64().map_or(false, |v| v == *i)
+                                            }
+                                            ontology_engine::PropertyValue::Double(d) => prop_val
+                                                .as_f64()
+                                                .map_or(false, |v| (v - d).abs() < 0.0001),
+                                            _ => false,
+                                        }
+                                    }
+                                    indexing::store::FilterOperator::GreaterThan => {
+                                        match &filter.value {
+                                            ontology_engine::PropertyValue::Integer(i) => {
+                                                prop_val.as_i64().map_or(false, |v| v > *i)
+                                            }
+                                            ontology_engine::PropertyValue::Double(d) => {
+                                                prop_val.as_f64().map_or(false, |v| v > *d)
+                                            }
+                                            _ => false,
+                                        }
+                                    }
+                                    indexing::store::FilterOperator::LessThan => {
+                                        match &filter.value {
+                                            ontology_engine::PropertyValue::Integer(i) => {
+                                                prop_val.as_i64().map_or(false, |v| v < *i)
+                                            }
+                                            ontology_engine::PropertyValue::Double(d) => {
+                                                prop_val.as_f64().map_or(false, |v| v < *d)
+                                            }
+                                            _ => false,
+                                        }
+                                    }
+                                    _ => true,
+                                }
+                            })
                         })
                     })
-                }).collect();
+                    .collect();
 
                 let total = filtered.len();
 
@@ -693,55 +777,165 @@ impl QueryRoot {
                                 row.insert("count".to_string(), Value::Number(items.len().into()));
                             }
                             indexing::store::Aggregation::Sum(prop) => {
-                                let sum: f64 = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).sum();
-                                row.insert(format!("sum_{}", prop), Value::Number(serde_json::Number::from_f64(sum).unwrap_or(0.into())));
+                                let sum: f64 = items
+                                    .iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .filter_map(|v| v.as_f64())
+                                    .sum();
+                                row.insert(
+                                    format!("sum_{}", prop),
+                                    Value::Number(
+                                        serde_json::Number::from_f64(sum).unwrap_or(0.into()),
+                                    ),
+                                );
                             }
                             indexing::store::Aggregation::Avg(prop) => {
-                                let vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
-                                let avg = if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 };
-                                row.insert(format!("avg_{}", prop), Value::Number(serde_json::Number::from_f64(avg).unwrap_or(0.into())));
+                                let vals: Vec<f64> = items
+                                    .iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .filter_map(|v| v.as_f64())
+                                    .collect();
+                                let avg = if vals.is_empty() {
+                                    0.0
+                                } else {
+                                    vals.iter().sum::<f64>() / vals.len() as f64
+                                };
+                                row.insert(
+                                    format!("avg_{}", prop),
+                                    Value::Number(
+                                        serde_json::Number::from_f64(avg).unwrap_or(0.into()),
+                                    ),
+                                );
                             }
                             indexing::store::Aggregation::Min(prop) => {
-                                let min = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).fold(f64::INFINITY, f64::min);
+                                let min = items
+                                    .iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .filter_map(|v| v.as_f64())
+                                    .fold(f64::INFINITY, f64::min);
                                 let min_val = if min.is_finite() { min } else { 0.0 };
-                                row.insert(format!("min_{}", prop), Value::Number(serde_json::Number::from_f64(min_val).unwrap_or(0.into())));
+                                row.insert(
+                                    format!("min_{}", prop),
+                                    Value::Number(
+                                        serde_json::Number::from_f64(min_val).unwrap_or(0.into()),
+                                    ),
+                                );
                             }
                             indexing::store::Aggregation::Max(prop) => {
-                                let max = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).fold(f64::NEG_INFINITY, f64::max);
+                                let max = items
+                                    .iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .filter_map(|v| v.as_f64())
+                                    .fold(f64::NEG_INFINITY, f64::max);
                                 let max_val = if max.is_finite() { max } else { 0.0 };
-                                row.insert(format!("max_{}", prop), Value::Number(serde_json::Number::from_f64(max_val).unwrap_or(0.into())));
+                                row.insert(
+                                    format!("max_{}", prop),
+                                    Value::Number(
+                                        serde_json::Number::from_f64(max_val).unwrap_or(0.into()),
+                                    ),
+                                );
                             }
                             indexing::store::Aggregation::Median(prop) => {
-                                let mut vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
-                                vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                                let median = if vals.is_empty() { 0.0 } else if vals.len() % 2 == 0 { (vals[vals.len()/2 - 1] + vals[vals.len()/2]) / 2.0 } else { vals[vals.len()/2] };
-                                row.insert(format!("median_{}", prop), Value::Number(serde_json::Number::from_f64(median).unwrap_or(0.into())));
+                                let mut vals: Vec<f64> = items
+                                    .iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .filter_map(|v| v.as_f64())
+                                    .collect();
+                                vals.sort_by(|a, b| {
+                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                let median = if vals.is_empty() {
+                                    0.0
+                                } else if vals.len() % 2 == 0 {
+                                    (vals[vals.len() / 2 - 1] + vals[vals.len() / 2]) / 2.0
+                                } else {
+                                    vals[vals.len() / 2]
+                                };
+                                row.insert(
+                                    format!("median_{}", prop),
+                                    Value::Number(
+                                        serde_json::Number::from_f64(median).unwrap_or(0.into()),
+                                    ),
+                                );
                             }
                             indexing::store::Aggregation::StdDev(prop) => {
-                                let vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
-                                let mean = if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 };
-                                let variance = if vals.len() < 2 { 0.0 } else { vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (vals.len() - 1) as f64 };
-                                row.insert(format!("stddev_{}", prop), Value::Number(serde_json::Number::from_f64(variance.sqrt()).unwrap_or(0.into())));
+                                let vals: Vec<f64> = items
+                                    .iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .filter_map(|v| v.as_f64())
+                                    .collect();
+                                let mean = if vals.is_empty() {
+                                    0.0
+                                } else {
+                                    vals.iter().sum::<f64>() / vals.len() as f64
+                                };
+                                let variance = if vals.len() < 2 {
+                                    0.0
+                                } else {
+                                    vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>()
+                                        / (vals.len() - 1) as f64
+                                };
+                                row.insert(
+                                    format!("stddev_{}", prop),
+                                    Value::Number(
+                                        serde_json::Number::from_f64(variance.sqrt())
+                                            .unwrap_or(0.into()),
+                                    ),
+                                );
                             }
                             indexing::store::Aggregation::Variance(prop) => {
-                                let vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
-                                let mean = if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 };
-                                let variance = if vals.len() < 2 { 0.0 } else { vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (vals.len() - 1) as f64 };
-                                row.insert(format!("variance_{}", prop), Value::Number(serde_json::Number::from_f64(variance).unwrap_or(0.into())));
+                                let vals: Vec<f64> = items
+                                    .iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .filter_map(|v| v.as_f64())
+                                    .collect();
+                                let mean = if vals.is_empty() {
+                                    0.0
+                                } else {
+                                    vals.iter().sum::<f64>() / vals.len() as f64
+                                };
+                                let variance = if vals.len() < 2 {
+                                    0.0
+                                } else {
+                                    vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>()
+                                        / (vals.len() - 1) as f64
+                                };
+                                row.insert(
+                                    format!("variance_{}", prop),
+                                    Value::Number(
+                                        serde_json::Number::from_f64(variance).unwrap_or(0.into()),
+                                    ),
+                                );
                             }
                             indexing::store::Aggregation::DistinctCount(prop) => {
-                                let distinct: std::collections::HashSet<String> = items.iter()
+                                let distinct: std::collections::HashSet<String> = items
+                                    .iter()
                                     .filter_map(|o| o.get(prop))
                                     .map(|v| v.to_string())
                                     .collect();
-                                row.insert(format!("distinct_count_{}", prop), Value::Number(distinct.len().into()));
+                                row.insert(
+                                    format!("distinct_count_{}", prop),
+                                    Value::Number(distinct.len().into()),
+                                );
                             }
                             indexing::store::Aggregation::Percentile(prop, pct) => {
-                                let mut vals: Vec<f64> = items.iter().filter_map(|o| o.get(prop)).filter_map(|v| v.as_f64()).collect();
-                                vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                                let idx = ((vals.len() as f64 * pct) as usize).min(vals.len().saturating_sub(1));
+                                let mut vals: Vec<f64> = items
+                                    .iter()
+                                    .filter_map(|o| o.get(prop))
+                                    .filter_map(|v| v.as_f64())
+                                    .collect();
+                                vals.sort_by(|a, b| {
+                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                let idx = ((vals.len() as f64 * pct) as usize)
+                                    .min(vals.len().saturating_sub(1));
                                 let pct_val = vals.get(idx).copied().unwrap_or(0.0);
-                                row.insert(format!("p{}_{}", (*pct * 100.0) as u8, prop), Value::Number(serde_json::Number::from_f64(pct_val).unwrap_or(0.into())));
+                                row.insert(
+                                    format!("p{}_{}", (*pct * 100.0) as u8, prop),
+                                    Value::Number(
+                                        serde_json::Number::from_f64(pct_val).unwrap_or(0.into()),
+                                    ),
+                                );
                             }
                             _ => {}
                         }
@@ -754,16 +948,23 @@ impl QueryRoot {
                     vec![Value::Object(row)]
                 } else {
                     let group_key = &group_by_cols[0];
-                    let mut groups: std::collections::HashMap<String, Vec<&Value>> = std::collections::HashMap::new();
+                    let mut groups: std::collections::HashMap<String, Vec<&Value>> =
+                        std::collections::HashMap::new();
                     for obj in &filtered {
-                        let key = obj.get(group_key).map(|v| v.to_string()).unwrap_or_default();
+                        let key = obj
+                            .get(group_key)
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
                         groups.entry(key).or_default().push(obj);
                     }
-                    let mut result_rows: Vec<Value> = groups.into_iter().map(|(group_val, group_items)| {
-                        let mut row = compute_aggs(&group_items);
-                        row.insert(group_key.clone(), Value::String(group_val));
-                        Value::Object(row)
-                    }).collect();
+                    let mut result_rows: Vec<Value> = groups
+                        .into_iter()
+                        .map(|(group_val, group_items)| {
+                            let mut row = compute_aggs(&group_items);
+                            row.insert(group_key.clone(), Value::String(group_val));
+                            Value::Object(row)
+                        })
+                        .collect();
                     result_rows.sort_by(|a, b| {
                         let ka = a.get(group_key).map(|v| v.to_string()).unwrap_or_default();
                         let kb = b.get(group_key).map(|v| v.to_string()).unwrap_or_default();
@@ -787,15 +988,22 @@ impl QueryRoot {
         };
 
         // Execute aggregation
-        let result = columnar_store.query_analytics(&object_type, &query).await
+        let result = columnar_store
+            .query_analytics(&object_type, &query)
+            .await
             .map_err(|e| async_graphql::Error::new(format!("Aggregation error: {}", e)))?;
 
         // Convert results
-        let rows: Vec<serde_json::Value> = result.rows.iter()
+        let rows: Vec<serde_json::Value> = result
+            .rows
+            .iter()
             .map(|row| {
                 let mut json_row = serde_json::Map::new();
                 for (key, value) in row {
-                    json_row.insert(key.clone(), serde_json::to_value(value).unwrap_or(serde_json::Value::Null));
+                    json_row.insert(
+                        key.clone(),
+                        serde_json::to_value(value).unwrap_or(serde_json::Value::Null),
+                    );
                 }
                 serde_json::Value::Object(json_row)
             })
@@ -806,7 +1014,7 @@ impl QueryRoot {
             total: result.total,
         })
     }
-    
+
     /// Call a function defined in the ontology
     async fn call_function(
         &self,
@@ -817,17 +1025,19 @@ impl QueryRoot {
         let ontology = ctx.data::<Arc<Ontology>>()?;
         let graph_store = ctx.data::<Arc<dyn GraphStore>>()?;
         let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
-        
+
         // Get function definition
-        let function_def = ontology.get_function_type(&function_id)
-            .ok_or_else(|| async_graphql::Error::new(format!("Function '{}' not found", function_id)))?;
-        
+        let function_def = ontology.get_function_type(&function_id).ok_or_else(|| {
+            async_graphql::Error::new(format!("Function '{}' not found", function_id))
+        })?;
+
         // Parse parameters from JSON strings to PropertyValues
         let mut param_map = ontology_engine::PropertyMap::new();
         for (key, json_value) in parameters {
-            let value: serde_json::Value = serde_json::from_str(&json_value)
-                .map_err(|e| async_graphql::Error::new(format!("Invalid parameter JSON for '{}': {}", key, e)))?;
-            
+            let value: serde_json::Value = serde_json::from_str(&json_value).map_err(|e| {
+                async_graphql::Error::new(format!("Invalid parameter JSON for '{}': {}", key, e))
+            })?;
+
             let prop_value = match value {
                 serde_json::Value::String(s) => ontology_engine::PropertyValue::String(s),
                 serde_json::Value::Number(n) => {
@@ -836,38 +1046,53 @@ impl QueryRoot {
                     } else if let Some(d) = n.as_f64() {
                         ontology_engine::PropertyValue::Double(d)
                     } else {
-                        return Err(async_graphql::Error::new(format!("Invalid number for parameter '{}'", key)));
+                        return Err(async_graphql::Error::new(format!(
+                            "Invalid number for parameter '{}'",
+                            key
+                        )));
                     }
                 }
                 serde_json::Value::Bool(b) => ontology_engine::PropertyValue::Boolean(b),
                 serde_json::Value::Array(arr) => {
-                    let prop_values: Result<Vec<ontology_engine::PropertyValue>, _> = arr.into_iter()
-                        .map(|v| {
-                            match v {
-                                serde_json::Value::String(s) => Ok(ontology_engine::PropertyValue::String(s)),
-                                serde_json::Value::Number(n) => {
-                                    if let Some(i) = n.as_i64() {
-                                        Ok(ontology_engine::PropertyValue::Integer(i))
-                                    } else if let Some(d) = n.as_f64() {
-                                        Ok(ontology_engine::PropertyValue::Double(d))
-                                    } else {
-                                        Err("Invalid number in array")
-                                    }
-                                }
-                                serde_json::Value::Bool(b) => Ok(ontology_engine::PropertyValue::Boolean(b)),
-                                _ => Err("Unsupported array element type"),
+                    let prop_values: Result<Vec<ontology_engine::PropertyValue>, _> = arr
+                        .into_iter()
+                        .map(|v| match v {
+                            serde_json::Value::String(s) => {
+                                Ok(ontology_engine::PropertyValue::String(s))
                             }
+                            serde_json::Value::Number(n) => {
+                                if let Some(i) = n.as_i64() {
+                                    Ok(ontology_engine::PropertyValue::Integer(i))
+                                } else if let Some(d) = n.as_f64() {
+                                    Ok(ontology_engine::PropertyValue::Double(d))
+                                } else {
+                                    Err("Invalid number in array")
+                                }
+                            }
+                            serde_json::Value::Bool(b) => {
+                                Ok(ontology_engine::PropertyValue::Boolean(b))
+                            }
+                            _ => Err("Unsupported array element type"),
                         })
                         .collect();
-                    ontology_engine::PropertyValue::Array(prop_values
-                        .map_err(|e| async_graphql::Error::new(format!("Invalid array for parameter '{}': {:?}", key, e)))?)
+                    ontology_engine::PropertyValue::Array(prop_values.map_err(|e| {
+                        async_graphql::Error::new(format!(
+                            "Invalid array for parameter '{}': {:?}",
+                            key, e
+                        ))
+                    })?)
                 }
-                _ => return Err(async_graphql::Error::new(format!("Unsupported parameter type for '{}'", key))),
+                _ => {
+                    return Err(async_graphql::Error::new(format!(
+                        "Unsupported parameter type for '{}'",
+                        key
+                    )))
+                }
             };
-            
+
             param_map.insert(key, prop_value);
         }
-        
+
         // Check cache if function is cacheable
         let mut cached = false;
         let cache_key = if function_def.cacheable {
@@ -882,7 +1107,7 @@ impl QueryRoot {
         } else {
             None
         };
-        
+
         // Try to get from cache
         let result_value = if let Some(key) = cache_key {
             // Get cache from context
@@ -899,9 +1124,12 @@ impl QueryRoot {
                         None, // get_object_property callback - would need to be implemented
                         None, // get_linked_objects callback - would need to be implemented
                         None, // aggregate_linked_properties callback - would need to be implemented
-                    ).await
-                    .map_err(|e| async_graphql::Error::new(format!("Function execution error: {}", e)))?;
-                    
+                    )
+                    .await
+                    .map_err(|e| {
+                        async_graphql::Error::new(format!("Function execution error: {}", e))
+                    })?;
+
                     // Store in cache
                     let result_value = result.value.clone();
                     drop(cache_read);
@@ -911,37 +1139,31 @@ impl QueryRoot {
                 }
             } else {
                 // No cache available, just execute
-                let result = FunctionExecutor::execute(
-                    function_def,
-                    &param_map,
-                    None,
-                    None,
-                    None,
-                ).await
-                .map_err(|e| async_graphql::Error::new(format!("Function execution error: {}", e)))?;
+                let result = FunctionExecutor::execute(function_def, &param_map, None, None, None)
+                    .await
+                    .map_err(|e| {
+                        async_graphql::Error::new(format!("Function execution error: {}", e))
+                    })?;
                 result.value
             }
         } else {
             // Function is not cacheable, just execute
-            let result = FunctionExecutor::execute(
-                function_def,
-                &param_map,
-                None,
-                None,
-                None,
-            ).await
-            .map_err(|e| async_graphql::Error::new(format!("Function execution error: {}", e)))?;
+            let result = FunctionExecutor::execute(function_def, &param_map, None, None, None)
+                .await
+                .map_err(|e| {
+                    async_graphql::Error::new(format!("Function execution error: {}", e))
+                })?;
             result.value
         };
-        
-        let value_json: Value = serde_json::to_value(&result_value)
-            .unwrap_or_else(|_| serde_json::Value::Null);
+
+        let value_json: Value =
+            serde_json::to_value(&result_value).unwrap_or_else(|_| serde_json::Value::Null);
         Ok(FunctionResult {
             value: Json(value_json),
             cached,
         })
     }
-    
+
     /// Query objects implementing an interface (polymorphic query)
     async fn query_interface(
         &self,
@@ -954,24 +1176,23 @@ impl QueryRoot {
         let ontology = ctx.data::<Arc<Ontology>>()?;
         let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
         let hydrator = ctx.data::<ObjectHydrator>()?;
-        
+
         // Get interface definition
-        let interface = ontology.get_interface(&interface_id)
-            .ok_or_else(|| async_graphql::Error::new(format!("Interface '{}' not found", interface_id)))?;
-        
+        let interface = ontology.get_interface(&interface_id).ok_or_else(|| {
+            async_graphql::Error::new(format!("Interface '{}' not found", interface_id))
+        })?;
+
         // Get all object types that implement this interface
-        let implementers = InterfaceValidator::get_implementers(
-            &interface_id,
-            ontology.object_types(),
-        );
-        
+        let implementers =
+            InterfaceValidator::get_implementers(&interface_id, ontology.object_types());
+
         if implementers.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // Query each implementing object type and combine results
         let mut all_results = Vec::new();
-        
+
         // Convert filters once for all object types
         let mut store_filters = Vec::new();
         if let Some(filter_inputs) = filters {
@@ -979,7 +1200,7 @@ impl QueryRoot {
                 store_filters.push(convert_filter_input(filter_input)?);
             }
         }
-        
+
         for object_type in implementers {
             let query = SearchQuery {
                 filters: store_filters.clone(),
@@ -987,18 +1208,21 @@ impl QueryRoot {
                 limit,
                 offset,
             };
-            
+
             // Search objects of this type
-            let indexed_objects = search_store.search(&object_type.id, &query).await
+            let indexed_objects = search_store
+                .search(&object_type.id, &query)
+                .await
                 .map_err(|e| async_graphql::Error::new(format!("Search error: {}", e)))?;
-            
+
             // Hydrate and add to results
-            let hydrated = hydrator.hydrate_batch(&indexed_objects, object_type)
+            let hydrated = hydrator
+                .hydrate_batch(&indexed_objects, object_type)
                 .map_err(|e| async_graphql::Error::new(format!("Hydration error: {}", e)))?;
-            
+
             for h in hydrated {
-                let properties_json: Value = serde_json::to_value(&h.properties)
-                    .unwrap_or_else(|_| serde_json::json!({}));
+                let properties_json: Value =
+                    serde_json::to_value(&h.properties).unwrap_or_else(|_| serde_json::json!({}));
                 all_results.push(ObjectResult {
                     object_type: h.object_type,
                     object_id: h.object_id,
@@ -1007,29 +1231,28 @@ impl QueryRoot {
                 });
             }
         }
-        
+
         Ok(all_results)
     }
-    
+
     /// Get all available functions
-    async fn get_functions(
-        &self,
-        ctx: &Context<'_>,
-    ) -> FieldResult<Vec<FunctionDefinition>> {
+    async fn get_functions(&self, ctx: &Context<'_>) -> FieldResult<Vec<FunctionDefinition>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
-        
+
         let functions: Vec<FunctionDefinition> = ontology
             .function_types()
             .map(|f| {
-                let parameters: Vec<PropertyOutput> = f.parameters.iter().map(|p| {
-                    PropertyOutput {
+                let parameters: Vec<PropertyOutput> = f
+                    .parameters
+                    .iter()
+                    .map(|p| PropertyOutput {
                         id: p.id.clone(),
                         display_name: p.display_name.clone(),
                         property_type: format!("{:?}", p.property_type),
                         required: p.required,
-                    }
-                }).collect();
-                
+                    })
+                    .collect();
+
                 FunctionDefinition {
                     id: f.id.clone(),
                     display_name: f.display_name.clone(),
@@ -1040,10 +1263,10 @@ impl QueryRoot {
                 }
             })
             .collect();
-        
+
         Ok(functions)
     }
-    
+
     /// Execute a function with parameters
     async fn execute_function(
         &self,
@@ -1054,33 +1277,32 @@ impl QueryRoot {
         // Use existing call_function implementation
         self.call_function(ctx, function_id, parameters).await
     }
-    
+
     /// Get all available interfaces
-    async fn get_interfaces(
-        &self,
-        ctx: &Context<'_>,
-    ) -> FieldResult<Vec<InterfaceDefinition>> {
+    async fn get_interfaces(&self, ctx: &Context<'_>) -> FieldResult<Vec<InterfaceDefinition>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
-        
+
         let search_store = ctx.data::<Arc<dyn SearchStore>>()?;
-        
+
         let mut interfaces = Vec::new();
         for i in ontology.interfaces() {
-            let properties: Vec<PropertyOutput> = i.properties.iter().map(|p| {
-                PropertyOutput {
+            let properties: Vec<PropertyOutput> = i
+                .properties
+                .iter()
+                .map(|p| PropertyOutput {
                     id: p.id.clone(),
                     display_name: p.display_name.clone(),
                     property_type: format!("{:?}", p.property_type),
                     required: p.required,
-                }
-            }).collect();
-            
+                })
+                .collect();
+
             // Get implementers
-            let implementer_types: Vec<_> = InterfaceValidator::get_implementers(
-                &i.id,
-                ontology.object_types(),
-            ).into_iter().collect();
-            
+            let implementer_types: Vec<_> =
+                InterfaceValidator::get_implementers(&i.id, ontology.object_types())
+                    .into_iter()
+                    .collect();
+
             // Get counts for each implementer (async operation)
             let mut implementers = Vec::new();
             for ot in implementer_types {
@@ -1092,18 +1314,18 @@ impl QueryRoot {
                     limit: Some(1), // Just check existence
                     offset: None,
                 };
-                
+
                 let count = match search_store.count_objects(&ot.id, None).await {
                     Ok(count) => count as usize,
                     Err(_) => 0,
                 };
-                
+
                 implementers.push(ImplementerInfo {
                     object_type: ot.id.clone(),
                     count,
                 });
             }
-            
+
             interfaces.push(InterfaceDefinition {
                 id: i.id.clone(),
                 display_name: i.display_name.clone(),
@@ -1111,10 +1333,10 @@ impl QueryRoot {
                 implementers,
             });
         }
-        
+
         Ok(interfaces)
     }
-    
+
     /// Query objects by interface (alias for query_interface)
     async fn query_by_interface(
         &self,
@@ -1125,9 +1347,10 @@ impl QueryRoot {
         offset: Option<usize>,
     ) -> FieldResult<Vec<ObjectResult>> {
         // Use existing query_interface implementation
-        self.query_interface(ctx, interface_id, filters, limit, offset).await
+        self.query_interface(ctx, interface_id, filters, limit, offset)
+            .await
     }
-    
+
     /// Get data quality metrics for an object type or property
     async fn data_quality_metrics(
         &self,
@@ -1147,7 +1370,7 @@ impl QueryRoot {
             quality_score: 1.0,
         })
     }
-    
+
     /// Get data lineage for an object
     async fn data_lineage(
         &self,
@@ -1167,7 +1390,7 @@ impl QueryRoot {
             transformations: Vec::new(),
         })
     }
-    
+
     /// Get usage metrics for objects
     async fn usage_metrics(
         &self,
@@ -1186,7 +1409,7 @@ impl QueryRoot {
             traversed_count: 0,
         })
     }
-    
+
     /// Get distribution statistics for a property
     async fn distribution(
         &self,
@@ -1204,7 +1427,7 @@ impl QueryRoot {
             kurtosis: None,
         })
     }
-    
+
     /// Get correlation matrix between properties
     async fn correlations(
         &self,
@@ -1218,7 +1441,7 @@ impl QueryRoot {
             correlations: Json(Value::Object(serde_json::Map::new())),
         })
     }
-    
+
     /// Perform time series analysis
     async fn time_series(
         &self,
@@ -1237,14 +1460,11 @@ impl QueryRoot {
             growth_rate: 0.0,
         })
     }
-    
+
     /// Get all object types
-    async fn get_object_types(
-        &self,
-        ctx: &Context<'_>,
-    ) -> FieldResult<Vec<ObjectTypeResult>> {
+    async fn get_object_types(&self, ctx: &Context<'_>) -> FieldResult<Vec<ObjectTypeResult>> {
         let ontology = ctx.data::<Arc<Ontology>>()?;
-        
+
         let object_types: Vec<ObjectTypeResult> = ontology
             .object_types()
             .map(|ot| ObjectTypeResult {
@@ -1252,11 +1472,10 @@ impl QueryRoot {
                 display_name: ot.display_name.clone(),
             })
             .collect();
-        
+
         Ok(object_types)
     }
 }
-
 
 /// Input for aggregation operations
 #[derive(InputObject)]
@@ -1300,19 +1519,21 @@ fn convert_filter_input(filter_input: FilterInput) -> FieldResult<Filter> {
         "intersects" => indexing::store::FilterOperator::Intersects,
         "within" => indexing::store::FilterOperator::Within,
         "withindistance" => indexing::store::FilterOperator::WithinDistance,
-        _ => return Err(async_graphql::Error::new(format!(
-            "Invalid filter operator: {}",
-            filter_input.operator
-        ))),
+        _ => {
+            return Err(async_graphql::Error::new(format!(
+                "Invalid filter operator: {}",
+                filter_input.operator
+            )))
+        }
     };
-    
+
     // Parse value from JSON string
     let value = serde_json::from_str::<serde_json::Value>(&filter_input.value)
         .map_err(|e| async_graphql::Error::new(format!("Invalid filter value JSON: {}", e)))?;
-    
+
     let property_value: ontology_engine::PropertyValue = serde_json::from_value(value)
         .map_err(|e| async_graphql::Error::new(format!("Failed to parse PropertyValue: {}", e)))?;
-    
+
     Ok(Filter {
         property: filter_input.property,
         operator,
@@ -1517,4 +1738,3 @@ pub struct TimeSeriesResult {
     #[graphql(name = "growthRate")]
     pub growth_rate: f64,
 }
-

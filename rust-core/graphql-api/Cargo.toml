@@ -35,3 +35,6 @@ path = "tests/resolvers_test.rs"
 name = "integration_test"
 path = "tests/integration_test.rs"
 
+
+[lints]
+workspace = true

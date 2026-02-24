@@ -2,21 +2,19 @@ use crate::queue::UserEdit;
 use ontology_engine::PropertyMap;
 
 /// Merge source data with user edits (overlay architecture)
-pub fn merge_source_and_edits(
-    source_properties: &PropertyMap,
-    edits: &[UserEdit],
-) -> MergeResult {
+pub fn merge_source_and_edits(source_properties: &PropertyMap, edits: &[UserEdit]) -> MergeResult {
     let mut merged = source_properties.clone();
     let mut overridden_properties = std::collections::HashSet::new();
     let mut conflicts = Vec::new();
-    
+
     // Apply edits in chronological order (oldest first)
     // In practice, we'd want the most recent edit for each property
-    let mut edits_by_property: std::collections::HashMap<String, &UserEdit> = std::collections::HashMap::new();
+    let mut edits_by_property: std::collections::HashMap<String, &UserEdit> =
+        std::collections::HashMap::new();
     for edit in edits {
         if edit.deleted {
             // Mark property as deleted
-            merged = merged; // Would need a way to track deleted properties
+            // Would need a way to track deleted properties; no-op for now
             overridden_properties.insert(edit.property_name.clone());
             edits_by_property.insert(edit.property_name.clone(), edit);
         } else {
@@ -27,7 +25,7 @@ pub fn merge_source_and_edits(
             }
         }
     }
-    
+
     // Apply the most recent edit for each property
     for (property_name, edit) in edits_by_property {
         if edit.deleted {
@@ -37,11 +35,11 @@ pub fn merge_source_and_edits(
         } else {
             // Check if source had this property
             let had_source_value = source_properties.contains_key(&property_name);
-            
+
             // Apply the edit
             merged.insert(property_name.clone(), edit.property_value.clone());
             overridden_properties.insert(property_name.clone());
-            
+
             // If source had a different value, record as conflict
             if had_source_value {
                 if let Some(source_value) = source_properties.get(&property_name) {
@@ -57,7 +55,7 @@ pub fn merge_source_and_edits(
             }
         }
     }
-    
+
     MergeResult {
         merged_properties: merged,
         overridden_properties,
@@ -85,15 +83,21 @@ pub struct PropertyConflict {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ontology_engine::PropertyValue;
     use chrono::Utc;
-    
+    use ontology_engine::PropertyValue;
+
     #[test]
     fn test_merge_source_and_edits() {
         let mut source = PropertyMap::new();
-        source.insert("prop1".to_string(), PropertyValue::String("source_value".to_string()));
-        source.insert("prop2".to_string(), PropertyValue::String("source_value2".to_string()));
-        
+        source.insert(
+            "prop1".to_string(),
+            PropertyValue::String("source_value".to_string()),
+        );
+        source.insert(
+            "prop2".to_string(),
+            PropertyValue::String("source_value2".to_string()),
+        );
+
         let edit = UserEdit {
             edit_id: "edit1".to_string(),
             object_type: "test".to_string(),
@@ -104,30 +108,33 @@ mod tests {
             timestamp: Utc::now(),
             deleted: false,
         };
-        
+
         let result = merge_source_and_edits(&source, &[edit]);
-        
+
         // Check that prop1 was overridden
         assert!(result.overridden_properties.contains("prop1"));
-        
+
         // Check that the merged value is the edited value
         assert_eq!(
             result.merged_properties.get("prop1"),
             Some(&PropertyValue::String("edited_value".to_string()))
         );
-        
+
         // Check that prop2 remains unchanged
         assert_eq!(
             result.merged_properties.get("prop2"),
             Some(&PropertyValue::String("source_value2".to_string()))
         );
     }
-    
+
     #[test]
     fn test_merge_with_conflict() {
         let mut source = PropertyMap::new();
-        source.insert("prop1".to_string(), PropertyValue::String("source_value".to_string()));
-        
+        source.insert(
+            "prop1".to_string(),
+            PropertyValue::String("source_value".to_string()),
+        );
+
         let edit = UserEdit {
             edit_id: "edit1".to_string(),
             object_type: "test".to_string(),
@@ -138,9 +145,9 @@ mod tests {
             timestamp: Utc::now(),
             deleted: false,
         };
-        
+
         let result = merge_source_and_edits(&source, &[edit]);
-        
+
         // Should have a conflict
         assert!(!result.conflicts.is_empty());
         assert_eq!(result.conflicts[0].property_name, "prop1");

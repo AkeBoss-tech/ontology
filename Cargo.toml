@@ -15,6 +15,38 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Ontology Framework"]
 
+[workspace.lints.rust]
+unused_imports = "allow"
+unused_variables = "allow"
+unused_mut = "allow"
+dead_code = "allow"
+
+[workspace.lints.clippy]
+type_complexity = "allow"
+explicit_auto_deref = "allow"
+unnecessary_map_or = "allow"
+collapsible_if = "allow"
+too_many_arguments = "allow"
+redundant_closure = "allow"
+derivable_impls = "allow"
+assertions_on_constants = "allow"
+new_without_default = "allow"
+should_implement_trait = "allow"
+inherent_to_string = "allow"
+question_mark = "allow"
+useless_vec = "allow"
+approx_constant = "allow"
+collapsible_match = "allow"
+collapsible_str_replace = "allow"
+manual_clamp = "allow"
+needless_borrows_for_generic_args = "allow"
+only_used_in_recursion = "allow"
+unwrap_or_default = "allow"
+manual_is_multiple_of = "allow"
+single_component_path_imports = "allow"
+unnecessary_lazy_evaluations = "allow"
+default_constructed_unit_structs = "allow"
+
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
